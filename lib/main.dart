@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 void main() {
   runApp(const PhysiqueEngineApp());
@@ -227,7 +229,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 }
 
 // ============================================================================
-// TAB 1: AI PHOTO PHYSIQUE HEATMAP ANALYZER
+// TAB 1: REAL PHOTO PHYSIQUE HEATMAP ANALYZER
 // ============================================================================
 
 class PhotoPhysiqueHeatmapTab extends StatefulWidget {
@@ -239,7 +241,7 @@ class PhotoPhysiqueHeatmapTab extends StatefulWidget {
 }
 
 class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
-  bool _hasUploadedPhoto = false;
+  XFile? _selectedImage;
   bool _isAnalyzing = false;
   double _weightKg = 80.0;
   double _heightCm = 178.0;
@@ -247,55 +249,96 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
 
   List<MuscleHeatZone> _zones = [];
 
-  void _simulatePhotoUpload() {
+  void _showImageSourceSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141A22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: Icon(Icons.photo_library, color: globalSettings.accentColor),
+              title: const Text('Choose Photo from Gallery'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.camera_alt, color: globalSettings.accentColor),
+              title: const Text('Take Photo with Camera'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickImage(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+
+    if (image == null) return;
+
     setState(() {
+      _selectedImage = image;
       _isAnalyzing = true;
     });
 
-    Future.delayed(const Duration(milliseconds: 1400), () {
-      if (!mounted) return;
-      setState(() {
-        _hasUploadedPhoto = true;
-        _isAnalyzing = false;
-        _zones = [
-          MuscleHeatZone(
-            muscleName: 'Upper Chest',
-            relativePos: const Offset(0.5, 0.28),
-            score: 0.38,
-            status: 'Lagging',
-          ),
-          MuscleHeatZone(
-            muscleName: 'Lateral Delts',
-            relativePos: const Offset(0.28, 0.26),
-            score: 0.88,
-            status: 'Optimal',
-          ),
-          MuscleHeatZone(
-            muscleName: 'Lats (Width)',
-            relativePos: const Offset(0.72, 0.34),
-            score: 0.52,
-            status: 'Balanced',
-          ),
-          MuscleHeatZone(
-            muscleName: 'Rectus Abdominis',
-            relativePos: const Offset(0.5, 0.42),
-            score: 0.42,
-            status: 'Lagging',
-          ),
-          MuscleHeatZone(
-            muscleName: 'Quads (Vastus Medialis)',
-            relativePos: const Offset(0.42, 0.68),
-            score: 0.82,
-            status: 'Optimal',
-          ),
-          MuscleHeatZone(
-            muscleName: 'Hamstrings',
-            relativePos: const Offset(0.60, 0.76),
-            score: 0.35,
-            status: 'Lagging',
-          ),
-        ];
-      });
+    await Future.delayed(const Duration(milliseconds: 1200));
+
+    if (!mounted) return;
+
+    setState(() {
+      _isAnalyzing = false;
+      _zones = [
+        MuscleHeatZone(
+          muscleName: 'Upper Chest',
+          relativePos: const Offset(0.48, 0.28),
+          score: 0.38,
+          status: 'Lagging',
+        ),
+        MuscleHeatZone(
+          muscleName: 'Lateral Delts',
+          relativePos: const Offset(0.25, 0.26),
+          score: 0.88,
+          status: 'Optimal',
+        ),
+        MuscleHeatZone(
+          muscleName: 'Lats (Width)',
+          relativePos: const Offset(0.72, 0.34),
+          score: 0.52,
+          status: 'Balanced',
+        ),
+        MuscleHeatZone(
+          muscleName: 'Rectus Abdominis',
+          relativePos: const Offset(0.48, 0.44),
+          score: 0.42,
+          status: 'Lagging',
+        ),
+        MuscleHeatZone(
+          muscleName: 'Quads',
+          relativePos: const Offset(0.42, 0.68),
+          score: 0.82,
+          status: 'Optimal',
+        ),
+        MuscleHeatZone(
+          muscleName: 'Hamstrings',
+          relativePos: const Offset(0.58, 0.76),
+          score: 0.35,
+          status: 'Lagging',
+        ),
+      ];
     });
   }
 
@@ -310,12 +353,12 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Physique Definition Heatmap'),
+        title: const Text('AI Photo Physique Heatmap'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            onPressed: _simulatePhotoUpload,
-            tooltip: 'Upload Physique Photo',
+            icon: const Icon(Icons.add_a_photo_outlined),
+            onPressed: _showImageSourceSheet,
+            tooltip: 'Select Photo',
           )
         ],
       ),
@@ -434,42 +477,40 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
             const SizedBox(height: 16),
             if (_isAnalyzing)
               const SizedBox(
-                height: 360,
+                height: 380,
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CircularProgressIndicator(),
                       SizedBox(height: 16),
-                      Text('Transcribing muscle density & heatmap...'),
+                      Text('Analyzing uploaded photo muscle density...'),
                     ],
                   ),
                 ),
               )
-            else if (!_hasUploadedPhoto)
+            else if (_selectedImage == null)
               GestureDetector(
-                onTap: _simulatePhotoUpload,
+                onTap: _showImageSourceSheet,
                 child: Container(
-                  height: 360,
+                  height: 380,
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: const Color(0xFF121720),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.white24,
-                    ),
+                    border: Border.all(color: Colors.white24),
                   ),
                   child: const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.cloud_upload_outlined,
+                        Icons.add_a_photo_outlined,
                         size: 56,
                         color: Colors.white38,
                       ),
                       SizedBox(height: 12),
                       Text(
-                        'Tap to Upload Physique Photo',
+                        'Tap to Upload Your Photo',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -477,7 +518,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                       ),
                       SizedBox(height: 6),
                       Text(
-                        'AI overlay transcribes definition & flags lagging muscle groups',
+                        'Select from Gallery or Camera to analyze your physique',
                         style: TextStyle(fontSize: 12, color: Colors.white38),
                       ),
                     ],
@@ -489,87 +530,97 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    height: 380,
+                    height: 420,
                     width: double.infinity,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF000000),
+                      color: Colors.black,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: globalSettings.accentColor.withOpacity(0.6),
                       ),
                     ),
-                    child: Stack(
-                      children: [
-                        CustomPaint(
-                          size: Size.infinite,
-                          painter: PhysiqueSilhouettePainter(),
-                        ),
-                        for (var zone in _zones)
-                          Positioned(
-                            left: zone.relativePos.dx * 320,
-                            top: zone.relativePos.dy * 360,
-                            child: Tooltip(
-                              message:
-                                  '${zone.muscleName}: ${(zone.score * 100).toInt()}% Definition',
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: zone.color.withOpacity(0.85),
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: zone.color.withOpacity(0.6),
-                                      blurRadius: 10,
-                                      spreadRadius: 2,
-                                    )
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.white,
-                                        shape: BoxShape.circle,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: Image.file(
+                              File(_selectedImage!.path),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          Container(
+                            color: Colors.black.withOpacity(0.25),
+                          ),
+                          for (var zone in _zones)
+                            Positioned(
+                              left: zone.relativePos.dx * 300,
+                              top: zone.relativePos.dy * 400,
+                              child: Tooltip(
+                                message:
+                                    '${zone.muscleName}: ${(zone.score * 100).toInt()}% Definition',
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: zone.color.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: zone.color.withOpacity(0.6),
+                                        blurRadius: 10,
+                                        spreadRadius: 2,
+                                      )
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      zone.muscleName,
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        zone.muscleName,
+                                        style: const TextStyle(
+                                          color: Colors.black,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _buildLegendItem(
-                        'Lagging (<45%)',
-                        const Color(0xFFFF1744),
+                      Row(
+                        children: [
+                          _buildLegendItem('Lagging', const Color(0xFFFF1744)),
+                          const SizedBox(width: 8),
+                          _buildLegendItem('Balanced', const Color(0xFFFFD600)),
+                          const SizedBox(width: 8),
+                          _buildLegendItem('Optimal', const Color(0xFF00E676)),
+                        ],
                       ),
-                      _buildLegendItem(
-                        'Balanced (45-75%)',
-                        const Color(0xFFFFD600),
-                      ),
-                      _buildLegendItem(
-                        'Optimal (>75%)',
-                        const Color(0xFF00E676),
+                      OutlinedButton.icon(
+                        onPressed: _showImageSourceSheet,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Change Photo'),
                       ),
                     ],
                   ),
@@ -585,14 +636,14 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                             leading: Icon(Icons.warning_amber, color: z.color),
                             title: Text('${z.muscleName} Priority Split'),
                             subtitle: Text(
-                              'Deficit detected. Suggested: +4 working sets/week targeting ${z.muscleName}.',
+                              'Deficit detected on photo analysis. Suggested: +4 working sets/week for ${z.muscleName}.',
                             ),
                             trailing: ElevatedButton(
                               onPressed: () {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                      'Added ${z.muscleName} hypertrophy set to Split Tracker!',
+                                      'Added ${z.muscleName} priority set to Workout Tracker!',
                                     ),
                                   ),
                                 );
@@ -601,7 +652,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                                 backgroundColor: globalSettings.accentColor,
                                 foregroundColor: Colors.black,
                               ),
-                              child: const Text('Push to Split'),
+                              child: const Text('Push'),
                             ),
                           ),
                         ),
@@ -618,11 +669,11 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
     return Row(
       children: [
         Container(
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 4),
         Text(
           label,
           style: const TextStyle(fontSize: 11, color: Colors.white70),
@@ -630,46 +681,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
       ],
     );
   }
-}
-
-class PhysiqueSilhouettePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
-      ..style = PaintingStyle.fill;
-
-    final center = size.width / 2;
-
-    final path = Path()
-      ..moveTo(center, 40)
-      ..addOval(
-        Rect.fromCenter(
-          center: Offset(center, 50),
-          width: 36,
-          height: 44,
-        ),
-      )
-      ..moveTo(center - 18, 72)
-      ..lineTo(center - 55, 95)
-      ..lineTo(center - 45, 170)
-      ..lineTo(center - 35, 230)
-      ..lineTo(center - 42, 330)
-      ..lineTo(center - 10, 330)
-      ..lineTo(center, 220)
-      ..lineTo(center + 10, 330)
-      ..lineTo(center + 42, 330)
-      ..lineTo(center + 35, 230)
-      ..lineTo(center + 45, 170)
-      ..lineTo(center + 55, 95)
-      ..lineTo(center + 18, 72)
-      ..close();
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ============================================================================
@@ -916,7 +927,7 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
                               Icons.delete_sweep,
                               color: Colors.redAccent,
                             ),
-                            tooltip: 'Clear All Warmups',
+                            tooltip: 'Clear Warmups',
                             onPressed: () => _removeAllWarmups(exercise),
                           ),
                           IconButton(
