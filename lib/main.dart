@@ -1,159 +1,678 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const GymMasterTitanProApp());
+  runApp(const PhysiqueEngineApp());
 }
 
-class GymMasterTitanProApp extends StatefulWidget {
-  const GymMasterTitanProApp({super.key});
+// ============================================================================
+// GLOBAL APP STATE & MODELS
+// ============================================================================
+
+enum UnitSystem { metric, imperial }
+
+class AppSettings extends ChangeNotifier {
+  UnitSystem unitSystem = UnitSystem.metric;
+  double defaultBarbellWeightKg = 20.0;
+  int defaultRestTimerSeconds = 90;
+  bool hapticsEnabled = true;
+  Color accentColor = const Color(0xFF00E676);
+  double mevThresholdMultiplier = 1.0;
+
+  void updateSettings({
+    UnitSystem? unitSystem,
+    double? defaultBarbellWeightKg,
+    int? defaultRestTimerSeconds,
+    bool? hapticsEnabled,
+    Color? accentColor,
+    double? mevThresholdMultiplier,
+  }) {
+    if (unitSystem != null) this.unitSystem = unitSystem;
+    if (defaultBarbellWeightKg != null) {
+      this.defaultBarbellWeightKg = defaultBarbellWeightKg;
+    }
+    if (defaultRestTimerSeconds != null) {
+      this.defaultRestTimerSeconds = defaultRestTimerSeconds;
+    }
+    if (hapticsEnabled != null) this.hapticsEnabled = hapticsEnabled;
+    if (accentColor != null) this.accentColor = accentColor;
+    if (mevThresholdMultiplier != null) {
+      this.mevThresholdMultiplier = mevThresholdMultiplier;
+    }
+    notifyListeners();
+  }
+
+  String get weightUnit => unitSystem == UnitSystem.metric ? 'kg' : 'lbs';
+
+  double convertWeight(double kgValue) {
+    return unitSystem == UnitSystem.metric ? kgValue : kgValue * 2.20462;
+  }
+
+  double toKg(double value) {
+    return unitSystem == UnitSystem.metric ? value : value / 2.20462;
+  }
+}
+
+final AppSettings globalSettings = AppSettings();
+
+class ExerciseSet {
+  final String id;
+  double weightKg;
+  int reps;
+  double rpe;
+  bool isWarmup;
+  String label;
+
+  ExerciseSet({
+    required this.id,
+    required this.weightKg,
+    required this.reps,
+    required this.rpe,
+    this.isWarmup = false,
+    this.label = 'Working Set',
+  });
+}
+
+class ExerciseModel {
+  final String id;
+  String name;
+  String category;
+  List<ExerciseSet> sets;
+
+  ExerciseModel({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.sets,
+  });
+}
+
+class MuscleHeatZone {
+  final String muscleName;
+  final Offset relativePos; // Normalized 0.0 - 1.0 coordinates on photo canvas
+  final double score; // 0.0 (severely lagging) to 1.0 (peak definition)
+  final String status; // Lagging, Balanced, Optimal
+
+  MuscleHeatZone({
+    required this.muscleName,
+    required this.relativePos,
+    required this.score,
+    required this.status,
+  });
+
+  Color get color {
+    if (score < 0.45) return const Color(0xFFFF1744); // Red: Lagging
+    if (score < 0.75) return const Color(0xFFFFD600); // Yellow: Balanced
+    return const Color(0xFF00E676); // Green: Optimal / Dominant
+  }
+}
+
+// ============================================================================
+// MAIN APP ROOT
+// ============================================================================
+
+class PhysiqueEngineApp extends StatefulWidget {
+  const PhysiqueEngineApp({super.key});
 
   @override
-  State<GymMasterTitanProApp> createState() => _GymMasterTitanProAppState();
+  State<PhysiqueEngineApp> createState() => _PhysiqueEngineAppState();
 }
 
-class _GymMasterTitanProAppState extends State<GymMasterTitanProApp> {
-  Color _accentColor = const Color(0xFF00F0FF);
-
-  void _updateAccentColor(Color newColor) {
-    setState(() {
-      _accentColor = newColor;
-    });
+class _PhysiqueEngineAppState extends State<PhysiqueEngineApp> {
+  @override
+  void initState() {
+    super.initState();
+    globalSettings.addListener(() => setState(() {}));
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'Physique & Bio-Engine Lab',
       debugShowCheckedModeBanner: false,
-      title: 'Gym Master TITAN PRO',
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF030307),
-        cardColor: const Color(0xFF0B0C16),
-        primaryColor: _accentColor,
+        scaffoldBackgroundColor: const Color(0xFF0A0E14),
+        primaryColor: globalSettings.accentColor,
         colorScheme: ColorScheme.dark(
-          primary: _accentColor,
-          secondary: const Color(0xFF7000FF),
-          tertiary: const Color(0xFFFF0055),
-          surface: const Color(0xFF0B0C16),
+          primary: globalSettings.accentColor,
+          secondary: globalSettings.accentColor,
+          surface: const Color(0xFF141A22),
+        ),
+        cardTheme: CardTheme(
+          color: const Color(0xFF141A22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
-      home: TitanProShell(onAccentColorChanged: _updateAccentColor),
+      home: const MainNavigationScreen(),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// GLOBAL EXERCISE LIBRARY
-// -----------------------------------------------------------------------------
-const List<Map<String, String>> globalExerciseLibrary = [
-  {'name': 'Barbell Bench Press', 'group': 'Chest', 'equipment': 'Barbell', 'target': 'Chest'},
-  {'name': 'Incline DB Press', 'group': 'Chest', 'equipment': 'Dumbbells', 'target': 'Chest'},
-  {'name': 'Cable Chest Flye', 'group': 'Chest', 'equipment': 'Cable Tower', 'target': 'Chest'},
-  {'name': 'Triceps Pushdown', 'group': 'Arms', 'equipment': 'Cable Tower', 'target': 'Triceps'},
-  {'name': 'EZ-Bar Skullcrusher', 'group': 'Arms', 'equipment': 'EZ-Bar', 'target': 'Triceps'},
-  {'name': 'Barbell Back Squat', 'group': 'Legs', 'equipment': 'Squat Rack', 'target': 'Quads'},
-  {'name': 'Leg Press', 'group': 'Legs', 'equipment': 'Machine', 'target': 'Quads'},
-  {'name': 'Romanian Deadlift', 'group': 'Legs', 'equipment': 'Barbell', 'target': 'Hamstrings'},
-  {'name': 'Standing Calf Raise', 'group': 'Legs', 'equipment': 'Machine', 'target': 'Calves'},
-  {'name': 'Lat Pulldown', 'group': 'Back', 'equipment': 'Lat Pulldown', 'target': 'Lats'},
-  {'name': 'Seated Cable Row', 'group': 'Back', 'equipment': 'Cable Tower', 'target': 'Back'},
-  {'name': 'Dumbbell Biceps Curl', 'group': 'Arms', 'equipment': 'Dumbbells', 'target': 'Biceps'},
-  {'name': 'Overhead DB Press', 'group': 'Shoulders', 'equipment': 'Dumbbells', 'target': 'Shoulders'},
-  {'name': 'Cable Lateral Raise', 'group': 'Shoulders', 'equipment': 'Cable Tower', 'target': 'Delts'},
-  {'name': 'Hanging Leg Raise', 'group': 'Core', 'equipment': 'Pull-up Bar', 'target': 'Abs'},
-  {'name': 'Ab Wheel Rollout', 'group': 'Core', 'equipment': 'Ab Wheel', 'target': 'Abs'},
-];
-
-class TitanProShell extends StatefulWidget {
-  final Function(Color) onAccentColorChanged;
-  const TitanProShell({super.key, required this.onAccentColorChanged});
+class MainNavigationScreen extends StatefulWidget {
+  const MainNavigationScreen({super.key});
 
   @override
-  State<TitanProShell> createState() => _TitanProShellState();
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _TitanProShellState extends State<TitanProShell> {
+class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
+
+  final List<Widget> _tabs = [
+    const PhotoPhysiqueHeatmapTab(),
+    const LiveTrackerTab(),
+    const BarbellVisualizerTab(),
+    const BanisterFatigueTab(),
+    const FormulaInfoTab(),
+    const SettingsTab(),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> tabs = [
-      const LiveTrackerTab(),
-      const CustomRoutineBuilderTab(),
-      const PhotoPhysiqueHeatmapTab(),
-      const AnatomicalHeatmapTab(),
-      const ApreVbtTab(),
-      const BanisterTab(),
-      const PlateMathTab(),
-    ];
-
     return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(Icons.bolt, color: Theme.of(context).primaryColor, size: 16),
-            ),
-            const SizedBox(width: 8),
-            const Text('TITAN PRO 6.0 ENGINE', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 13)),
-          ],
-        ),
-        backgroundColor: const Color(0xFF06060D),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.menu_book_rounded, color: Colors.white70, size: 20),
-            tooltip: 'Engine Documentation',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EngineDocsScreen())),
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_suggest_rounded, color: Colors.white70, size: 20),
-            tooltip: 'System Preferences',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => SettingsScreen(onAccentChanged: widget.onAccentColorChanged)),
-            ),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: IndexedStack(index: _currentIndex, children: tabs),
+      body: IndexedStack(index: _currentIndex, children: _tabs),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (idx) => setState(() => _currentIndex = idx),
+        onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
-        backgroundColor: const Color(0xFF06060D),
-        selectedItemColor: Theme.of(context).primaryColor,
-        unselectedItemColor: Colors.grey[600],
-        selectedFontSize: 9,
-        unselectedFontSize: 8,
+        backgroundColor: const Color(0xFF0E141D),
+        selectedItemColor: globalSettings.accentColor,
+        unselectedItemColor: Colors.white38,
+        selectedFontSize: 11,
+        unselectedFontSize: 10,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Session Log'),
-          BottomNavigationBarItem(icon: Icon(Icons.alt_route), label: 'Split Builder'),
-          BottomNavigationBarItem(icon: Icon(Icons.linked_camera), label: 'Photo AI Heatmap'),
-          BottomNavigationBarItem(icon: Icon(Icons.accessibility_new), label: 'Volume Map'),
-          BottomNavigationBarItem(icon: Icon(Icons.speed), label: 'APRE / VBT'),
-          BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: 'ACWR Stress'),
-          BottomNavigationBarItem(icon: Icon(Icons.calculate), label: '1RM & Plates'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.center_focus_strong),
+            label: 'AI Photo',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.fitness_center),
+            label: 'Tracker',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.straighten),
+            label: 'Barbell',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.analytics),
+            label: 'ACWR',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.menu_book),
+            label: 'Docs & Math',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
         ],
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// TAB 1: LIVE SESSION TRACKER & WARMUP GENERATOR
-// -----------------------------------------------------------------------------
+// ============================================================================
+// TAB 1: AI PHOTO PHYSIQUE HEATMAP ANALYZER
+// ============================================================================
+
+class PhotoPhysiqueHeatmapTab extends StatefulWidget {
+  const PhotoPhysiqueHeatmapTab({super.key});
+
+  @override
+  State<PhotoPhysiqueHeatmapTab> createState() =>
+      _PhotoPhysiqueHeatmapTabState();
+}
+
+class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
+  bool _hasUploadedPhoto = false;
+  bool _isAnalyzing = false;
+  double _weightKg = 80.0;
+  double _heightCm = 178.0;
+  double _bodyFatPct = 14.0;
+
+  List<MuscleHeatZone> _zones = [];
+
+  void _simulatePhotoUpload() {
+    setState(() {
+      _isAnalyzing = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      setState(() {
+        _hasUploadedPhoto = true;
+        _isAnalyzing = false;
+        _zones = [
+          MuscleHeatZone(
+            muscleName: 'Upper Chest',
+            relativePos: const Offset(0.5, 0.28),
+            score: 0.38,
+            status: 'Lagging',
+          ),
+          MuscleHeatZone(
+            muscleName: 'Lateral Delts',
+            relativePos: const Offset(0.28, 0.26),
+            score: 0.88,
+            status: 'Optimal',
+          ),
+          MuscleHeatZone(
+            muscleName: 'Lats (Width)',
+            relativePos: const Offset(0.72, 0.34),
+            score: 0.52,
+            status: 'Balanced',
+          ),
+          MuscleHeatZone(
+            muscleName: 'Rectus Abdominis',
+            relativePos: const Offset(0.5, 0.42),
+            score: 0.42,
+            status: 'Lagging',
+          ),
+          MuscleHeatZone(
+            muscleName: 'Quads (Vastus Medialis)',
+            relativePos: const Offset(0.42, 0.68),
+            score: 0.82,
+            status: 'Optimal',
+          ),
+          MuscleHeatZone(
+            muscleName: 'Hamstrings',
+            relativePos: const Offset(0.60, 0.76),
+            score: 0.35,
+            status: 'Lagging',
+          ),
+        ];
+      });
+    });
+  }
+
+  double get _lbmKg => _weightKg * (1 - (_bodyFatPct / 100));
+  double get _heightM => _heightCm / 100;
+  double get _rawFfmi => _lbmKg / (_heightM * _heightM);
+  double get _normalizedFfmi => _rawFfmi + 6.1 * (1.80 - _heightM);
+
+  @override
+  Widget build(BuildContext context) {
+    final displayWeight = globalSettings.convertWeight(_weightKg);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AI Physique Definition Heatmap'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            onPressed: _simulatePhotoUpload,
+            tooltip: 'Upload Physique Photo',
+          )
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Bio Input Bar
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Weight: ${displayWeight.toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                          ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _weightKg,
+                            min: 50,
+                            max: 130,
+                            onChanged: (v) => setState(() => _weightKg = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('Height: ${_heightCm.toInt()} cm'),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _heightCm,
+                            min: 140,
+                            max: 210,
+                            onChanged: (v) => setState(() => _heightCm = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Body Fat: ${_bodyFatPct.toStringAsFixed(1)}%',
+                          ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _bodyFatPct,
+                            min: 5,
+                            max: 35,
+                            onChanged: (v) => setState(() => _bodyFatPct = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // FFMI Score Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141A22),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: globalSettings.accentColor.withOpacity(0.4),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Normalized FFMI',
+                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                      Text(
+                        _normalizedFfmi.toStringAsFixed(2),
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: globalSettings.accentColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        'Fat-Free Mass',
+                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                      Text(
+                        '${globalSettings.convertWeight(_lbmKg).toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Main Canvas Area
+            if (_isAnalyzing)
+              const SizedBox(
+                height: 360,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Transcribing muscle density & heatmap...'),
+                    ],
+                  ),
+                ),
+              )
+            else if (!_hasUploadedPhoto)
+              GestureDetector(
+                onTap: _simulatePhotoUpload,
+                child: Container(
+                  height: 360,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF121720),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.white24,
+                      style: BorderStyle.solid,
+                    ),
+                  ),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 56,
+                        color: Colors.white38,
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        'Tap to Upload Physique Photo',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'AI overlay transcribes definition & flags lagging muscle groups',
+                        style: TextStyle(fontSize: 12, color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 380,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF000000),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: globalSettings.accentColor.withOpacity(0.6),
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        // Background Body Silhouette Representation
+                        CustomPaint(
+                          size: Size.infinite,
+                          painter: PhysiqueSilhouettePainter(),
+                        ),
+                        // Heatmap Overlay Nodes
+                        for (var zone in _zones)
+                          Positioned(
+                            left: zone.relativePos.dx * 320,
+                            top: zone.relativePos.dy * 360,
+                            child: Tooltip(
+                              message:
+                                  '${zone.muscleName}: ${(zone.score * 100).toInt()}% Definition',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: zone.color.withOpacity(0.85),
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: zone.color.withOpacity(0.6),
+                                      blurRadius: 10,
+                                      spreadRadius: 2,
+                                    )
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      zone.muscleName,
+                                      style: const TextStyle(
+                                        color: Colors.black,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Color Legend
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildLegendItem(
+                        'Lagging (<45%)',
+                        const Color(0xFFFF1744),
+                      ),
+                      _buildLegendItem(
+                        'Balanced (45-75%)',
+                        const Color(0xFFFFD600),
+                      ),
+                      _buildLegendItem(
+                        'Optimal (>75%)',
+                        const Color(0xFF00E676),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'AI Targeted Recommendations',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ..._zones.where((z) => z.score < 0.5).map(
+                        (z) => Card(
+                          child: ListTile(
+                            leading: Icon(Icons.warning_amber, color: z.color),
+                            title: Text('${z.muscleName} Priority Split'),
+                            subtitle: Text(
+                              'Deficit detected. Suggested: +4 working sets/week targeting ${z.muscleName}.',
+                            ),
+                            trailing: ElevatedButton(
+                              onPressed: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Added ${z.muscleName} hypertrophy set to Split Tracker!',
+                                    ),
+                                  ),
+                                );
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: globalSettings.accentColor,
+                                foregroundColor: Colors.black,
+                              ),
+                              child: const Text('Push to Split'),
+                            ),
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: Colors.white70),
+        ),
+      ],
+    );
+  }
+}
+
+class PhysiqueSilhouettePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      color = Colors.white.withOpacity(0.08)
+      ..style = PaintingStyle.fill;
+
+    final center = size.width / 2;
+
+    // Simplified Body Visual Lines for Canvas Overlay Representation
+    final path = Path()
+      ..moveTo(center, 40) // Head
+      ..addOval(
+        Rect.fromCenter(
+          center: Offset(center, 50),
+          width: 36,
+          height: 44,
+        ),
+      )
+      ..moveTo(center - 18, 72) // Neck
+      ..lineTo(center - 55, 95) // Shoulders
+      ..lineTo(center - 45, 170) // Torso
+      ..lineTo(center - 35, 230) // Waist
+      ..lineTo(center - 42, 330) // Left Leg
+      ..lineTo(center - 10, 330)
+      ..lineTo(center, 220) // Inseam
+      ..lineTo(center + 10, 330) // Right Leg
+      ..lineTo(center + 42, 330)
+      ..lineTo(center + 35, 230)
+      ..lineTo(center + 45, 170)
+      ..lineTo(center + 55, 95)
+      ..lineTo(center + 18, 72)
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ============================================================================
+// TAB 2: LIVE TRACKER & CUSTOM WORKOUTS LOG
+// ============================================================================
+
 class LiveTrackerTab extends StatefulWidget {
   const LiveTrackerTab({super.key});
 
@@ -162,1302 +681,961 @@ class LiveTrackerTab extends StatefulWidget {
 }
 
 class _LiveTrackerTabState extends State<LiveTrackerTab> {
-  String selectedExercise = 'Barbell Bench Press';
-  double currentWeight = 100.0;
-  int currentReps = 8;
-  double currentRpe = 8.0;
-
-  List<Map<String, dynamic>> loggedSets = [];
-  int restTimerSeconds = 0;
-  Timer? timer;
-
-  void _startRestTimer(int duration) {
-    timer?.cancel();
-    setState(() => restTimerSeconds = duration);
-    timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (restTimerSeconds > 0) {
-        setState(() => restTimerSeconds--);
-        if (restTimerSeconds == 10 || restTimerSeconds == 5 || restTimerSeconds == 0) {
-          HapticFeedback.vibrate();
-        }
-      } else {
-        t.cancel();
-      }
-    });
-  }
-
-  void _addSet({String tag = 'W'}) {
-    setState(() {
-      loggedSets.add({
-        'exercise': selectedExercise,
-        'weight': currentWeight,
-        'reps': currentReps,
-        'rpe': currentRpe,
-        'tag': tag,
-        'time': DateTime.now(),
-      });
-    });
-    _startRestTimer(90);
-  }
-
-  void _generateWarmupPyramid() {
-    setState(() {
-      loggedSets.add({'exercise': selectedExercise, 'weight': (currentWeight * 0.40).roundToDouble(), 'reps': 10, 'rpe': 5.0, 'tag': 'W', 'time': DateTime.now()});
-      loggedSets.add({'exercise': selectedExercise, 'weight': (currentWeight * 0.60).roundToDouble(), 'reps': 5, 'rpe': 6.0, 'tag': 'W', 'time': DateTime.now()});
-      loggedSets.add({'exercise': selectedExercise, 'weight': (currentWeight * 0.75).roundToDouble(), 'reps': 3, 'rpe': 7.0, 'tag': 'W', 'time': DateTime.now()});
-      loggedSets.add({'exercise': selectedExercise, 'weight': (currentWeight * 0.90).roundToDouble(), 'reps': 1, 'rpe': 8.0, 'tag': 'W', 'time': DateTime.now()});
-    });
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Injected 4 Warmup Sets (Pyramid Protocol).')));
-  }
-
-  @override
-  void dispose() {
-    timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader('LIVE WORKOUT LOG & REST CONTROLLER'),
-          const SizedBox(height: 8),
-
-          // Rest Timer Bar
-          if (restTimerSeconds > 0)
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF0055).withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFF0055)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.timer, color: Color(0xFFFF0055), size: 20),
-                      const SizedBox(width: 8),
-                      Text('REST COUNTDOWN: ${restTimerSeconds}s', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF0055))),
-                    ],
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => restTimerSeconds = 0),
-                    child: const Text('SKIP', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                  )
-                ],
-              ),
-            ),
-
-          // Exercise Selector & Input Panel
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white12)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DropdownButton<String>(
-                  value: selectedExercise,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF101222),
-                  items: globalExerciseLibrary.map((e) => DropdownMenuItem(value: e['name']!, child: Text(e['name']!))).toList(),
-                  onChanged: (v) => setState(() => selectedExercise = v!),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('WEIGHT (kg)', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          const SizedBox(height: 4),
-                          SpinBoxWidget(
-                            value: currentWeight,
-                            step: 2.5,
-                            onChanged: (v) => setState(() => currentWeight = v),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('REPS', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          const SizedBox(height: 4),
-                          SpinBoxWidget(
-                            value: currentReps.toDouble(),
-                            step: 1.0,
-                            onChanged: (v) => setState(() => currentReps = v.toInt()),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('TARGET RPE', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          const SizedBox(height: 4),
-                          SpinBoxWidget(
-                            value: currentRpe,
-                            step: 0.5,
-                            onChanged: (v) => setState(() => currentRpe = v),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(side: BorderSide(color: Theme.of(context).primaryColor)),
-                        onPressed: _generateWarmupPyramid,
-                        icon: Icon(Icons.fireplace, size: 16, color: Theme.of(context).primaryColor),
-                        label: Text('GENERATE WARMUPS', style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.black),
-                        onPressed: () => _addSet(tag: 'W'),
-                        icon: const Icon(Icons.add_task, size: 16),
-                        label: const Text('LOG WORKING SET', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          _buildHeader('COMPLETED SETS IN THIS SESSION'),
-          const SizedBox(height: 8),
-
-          loggedSets.isEmpty
-              ? Container(
-                  padding: const EdgeInsets.all(24),
-                  width: double.infinity,
-                  decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12)),
-                  child: const Center(child: Text('No sets logged yet. Select an exercise and hit log.', style: TextStyle(color: Colors.grey, fontSize: 11))),
-                )
-              : ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: loggedSets.length,
-                  itemBuilder: (ctx, idx) {
-                    final s = loggedSets[idx];
-                    bool isWarmup = s['tag'] == 'W' && s['weight'] < currentWeight * 0.9;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0B0C16),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: isWarmup ? Colors.amber.withOpacity(0.3) : Theme.of(context).primaryColor.withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: isWarmup ? Colors.amber.withOpacity(0.2) : Theme.of(context).primaryColor.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(isWarmup ? 'WARM' : 'WORK', style: TextStyle(color: isWarmup ? Colors.amber : Theme.of(context).primaryColor, fontSize: 9, fontWeight: FontWeight.bold)),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(s['exercise'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                            ],
-                          ),
-                          Text('${s['weight']} kg  ×  ${s['reps']} reps  •  RPE ${s['rpe']}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                        ],
-                      ),
-                    );
-                  },
-                )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader(String title) {
-    return Text(title, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2));
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TAB 2: CUSTOM ROUTINE BUILDER (OPTION 5)
-// -----------------------------------------------------------------------------
-class CustomRoutineBuilderTab extends StatefulWidget {
-  const CustomRoutineBuilderTab({super.key});
-
-  @override
-  State<CustomRoutineBuilderTab> createState() => _CustomRoutineBuilderTabState();
-}
-
-class _CustomRoutineBuilderTabState extends State<CustomRoutineBuilderTab> {
-  List<Map<String, dynamic>> customRoutines = [
-    {
-      'title': 'Push Hypertrophy A',
-      'days': 'Mon / Thu',
-      'isDeload': false,
-      'exercises': [
-        {'name': 'Barbell Bench Press', 'targetSets': 4, 'repRange': '6-8', 'targetRpe': 8.5},
-        {'name': 'Overhead DB Press', 'targetSets': 3, 'repRange': '8-10', 'targetRpe': 8.0},
-        {'name': 'Triceps Pushdown', 'targetSets': 4, 'repRange': '10-12', 'targetRpe': 9.0},
-      ]
-    },
-    {
-      'title': 'Pull & Lat Width B',
-      'days': 'Tue / Fri',
-      'isDeload': false,
-      'exercises': [
-        {'name': 'Lat Pulldown', 'targetSets': 4, 'repRange': '8-10', 'targetRpe': 8.5},
-        {'name': 'Seated Cable Row', 'targetSets': 3, 'repRange': '10-12', 'targetRpe': 8.0},
-        {'name': 'Dumbbell Biceps Curl', 'targetSets': 4, 'repRange': '10-12', 'targetRpe': 9.0},
-      ]
-    }
+  final List<ExerciseModel> _activeSession = [
+    ExerciseModel(
+      id: 'ex1',
+      name: 'Barbell Incline Press',
+      category: 'Chest',
+      sets: [
+        ExerciseSet(id: 's1', weightKg: 80.0, reps: 8, rpe: 8.0),
+        ExerciseSet(id: 's2', weightKg: 80.0, reps: 8, rpe: 8.5),
+      ],
+    ),
+    ExerciseModel(
+      id: 'ex2',
+      name: 'Romanian Deadlift',
+      category: 'Hamstrings',
+      sets: [
+        ExerciseSet(id: 's3', weightKg: 110.0, reps: 10, rpe: 7.5),
+      ],
+    ),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _loadCustomRoutines();
+  final TextEditingController _customExerciseController =
+      TextEditingController();
+  String _selectedCategory = 'Chest';
+
+  final List<String> _categories = [
+    'Chest',
+    'Back',
+    'Legs',
+    'Shoulders',
+    'Arms',
+    'Core',
+  ];
+
+  void _addCustomExercise() {
+    if (_customExerciseController.text.trim().isEmpty) return;
+    setState(() {
+      _activeSession.add(
+        ExerciseModel(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: _customExerciseController.text.trim(),
+          category: _selectedCategory,
+          sets: [
+            ExerciseSet(
+              id: 's_new_${DateTime.now().millisecondsSinceEpoch}',
+              weightKg: 60.0,
+              reps: 10,
+              rpe: 7.0,
+            ),
+          ],
+        ),
+      );
+      _customExerciseController.clear();
+    });
+    Navigator.of(context).pop();
   }
 
-  Future<void> _loadCustomRoutines() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('titan_pro_custom_routines');
-    if (raw != null) {
-      setState(() {
-        customRoutines = List<Map<String, dynamic>>.from(jsonDecode(raw));
-      });
-    }
-  }
-
-  Future<void> _saveRoutines() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('titan_pro_custom_routines', jsonEncode(customRoutines));
-  }
-
-  void _addRoutineDialog() {
-    final titleCtrl = TextEditingController();
-    final daysCtrl = TextEditingController(text: 'Mon / Wed / Fri');
-
+  void _showAddExerciseDialog() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0B0C16),
-        title: const Text('CREATE CUSTOM ROUTINE', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        title: const Text('Add Custom Exercise'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Routine Name (e.g. Legs & Core)')),
-            const SizedBox(height: 8),
-            TextField(controller: daysCtrl, decoration: const InputDecoration(labelText: 'Target Days (e.g. Wed / Sat)')),
+            TextField(
+              controller: _customExerciseController,
+              decoration: const InputDecoration(
+                labelText: 'Exercise Name',
+                hintText: 'e.g. Bulgarian Split Squat',
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedCategory,
+              items: _categories
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
+              onChanged: (v) => setState(() => _selectedCategory = v!),
+              decoration: const InputDecoration(labelText: 'Muscle Group'),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCEL')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.black),
-            onPressed: () {
-              if (titleCtrl.text.isNotEmpty) {
-                setState(() {
-                  customRoutines.add({'title': titleCtrl.text, 'days': daysCtrl.text, 'isDeload': false, 'exercises': []});
-                });
-                _saveRoutines();
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('CREATE'),
-          )
+            onPressed: _addCustomExercise,
+            child: const Text('Add Exercise'),
+          ),
         ],
       ),
     );
   }
 
-  void _addExerciseToRoutine(int routineIndex) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF0B0C16),
-      builder: (ctx) => ListView.builder(
-        itemCount: globalExerciseLibrary.length,
-        itemBuilder: (c, i) {
-          final ex = globalExerciseLibrary[i];
-          return ListTile(
-            title: Text(ex['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            subtitle: Text('${ex['group']} • ${ex['equipment']}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-            trailing: Icon(Icons.add_circle, color: Theme.of(context).primaryColor),
-            onTap: () {
-              setState(() {
-                customRoutines[routineIndex]['exercises'].add({
-                  'name': ex['name'],
-                  'targetSets': 3,
-                  'repRange': '8-12',
-                  'targetRpe': 8.0,
-                });
-              });
-              _saveRoutines();
-              Navigator.pop(ctx);
-            },
-          );
-        },
-      ),
+  void _generatePyramidWarmups(ExerciseModel exercise) {
+    if (exercise.sets.isEmpty) return;
+
+    final topSet = exercise.sets.firstWhere(
+      (s) => !s.isWarmup,
+      orElse: () => exercise.sets.first,
     );
+
+    final double topWeight = topSet.weightKg;
+
+    // 40% x 8, 60% x 5, 75% x 3, 90% x 1
+    final warmups = [
+      ExerciseSet(
+        id: 'w1_${DateTime.now().millisecondsSinceEpoch}',
+        weightKg: topWeight * 0.40,
+        reps: 8,
+        rpe: 5.0,
+        isWarmup: true,
+        label: 'Warmup 40%',
+      ),
+      ExerciseSet(
+        id: 'w2_${DateTime.now().millisecondsSinceEpoch}',
+        weightKg: topWeight * 0.60,
+        reps: 5,
+        rpe: 5.5,
+        isWarmup: true,
+        label: 'Warmup 60%',
+      ),
+      ExerciseSet(
+        id: 'w3_${DateTime.now().millisecondsSinceEpoch}',
+        weightKg: topWeight * 0.75,
+        reps: 3,
+        rpe: 6.0,
+        isWarmup: true,
+        label: 'Warmup 75%',
+      ),
+      ExerciseSet(
+        id: 'w4_${DateTime.now().millisecondsSinceEpoch}',
+        weightKg: topWeight * 0.90,
+        reps: 1,
+        rpe: 6.5,
+        isWarmup: true,
+        label: 'Warmup 90%',
+      ),
+    ];
+
+    setState(() {
+      exercise.sets.insertAll(0, warmups);
+    });
+
+    if (globalSettings.hapticsEnabled) {
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  void _removeAllWarmups(ExerciseModel exercise) {
+    setState(() {
+      exercise.sets.removeWhere((s) => s.isWarmup);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: const Text('NEW ROUTINE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-        onPressed: _addRoutineDialog,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(14.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('CUSTOM SPLIT TEMPLATES & DELOAD CONTROL', style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-            const SizedBox(height: 10),
-
-            ...List.generate(customRoutines.length, (rIdx) {
-              final routine = customRoutines[rIdx];
-              final List exList = routine['exercises'] ?? [];
-              bool isDeload = routine['isDeload'] ?? false;
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0B0C16),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDeload ? Colors.amber : Theme.of(context).primaryColor.withOpacity(0.3)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(routine['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            Text(routine['days'], style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 10)),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            const Text('Deload', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                            Switch(
-                              value: isDeload,
-                              activeColor: Colors.amber,
-                              onChanged: (val) {
-                                setState(() => routine['isDeload'] = val);
-                                _saveRoutines();
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
-                              onPressed: () {
-                                setState(() => customRoutines.removeAt(rIdx));
-                                _saveRoutines();
-                              },
-                            )
-                          ],
-                        )
-                      ],
-                    ),
-                    const Divider(color: Colors.white10, height: 12),
-
-                    ...List.generate(exList.length, (eIdx) {
-                      final ex = exList[eIdx];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(child: Text('${eIdx + 1}. ${ex['name']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                            Text(
-                              isDeload ? '${(ex['targetSets'] / 2).ceil()} Sets (Deload -20% Load)' : '${ex['targetSets']} Sets • ${ex['repRange']} Reps • RPE ${ex['targetRpe']}',
-                              style: TextStyle(color: isDeload ? Colors.amber : Colors.white70, fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        icon: Icon(Icons.add, size: 14, color: Theme.of(context).primaryColor),
-                        label: Text('ADD EXERCISE', style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                        onPressed: () => _addExerciseToRoutine(rIdx),
-                      ),
-                    )
-                  ],
-                ),
-              );
-            }),
-            const SizedBox(height: 60),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TAB 3: PHOTO PHYSIQUE AI HEATMAP ANALYZER
-// -----------------------------------------------------------------------------
-class PhotoPhysiqueHeatmapTab extends StatefulWidget {
-  const PhotoPhysiqueHeatmapTab({super.key});
-
-  @override
-  State<PhotoPhysiqueHeatmapTab> createState() => _PhotoPhysiqueHeatmapTabState();
-}
-
-class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
-  final weightCtrl = TextEditingController(text: '80');
-  final heightCtrl = TextEditingController(text: '180');
-  final bodyFatCtrl = TextEditingController(text: '14');
-
-  bool isAnalyzing = false;
-  bool photoLoaded = false;
-  String selectedPose = 'Anterior (Front Pose)';
-
-  Map<String, double> muscleScores = {
-    'Chest': 85.0,
-    'Shoulders': 78.0,
-    'Abs': 90.0,
-    'Quads': 52.0,
-    'Lats': 45.0,
-    'Arms': 82.0,
-  };
-
-  void _runAiPhysiqueScan() {
-    setState(() => isAnalyzing = true);
-    Timer(const Duration(seconds: 2), () {
-      double weight = double.tryParse(weightCtrl.text) ?? 80;
-      double height = double.tryParse(heightCtrl.text) ?? 180;
-      double bf = double.tryParse(bodyFatCtrl.text) ?? 14;
-
-      double leanMassKg = weight * (1 - (bf / 100));
-      double heightM = height / 100;
-      double ffmi = leanMassKg / (heightM * heightM);
-
-      setState(() {
-        isAnalyzing = false;
-        photoLoaded = true;
-        muscleScores = {
-          'Chest': min(98.0, 60 + (ffmi * 1.2)),
-          'Shoulders': min(95.0, 55 + (ffmi * 1.1)),
-          'Abs': max(30.0, 100 - (bf * 3.5)),
-          'Quads': max(40.0, 42 + (ffmi * 0.8)),
-          'Lats': max(35.0, 38 + (ffmi * 0.7)),
-          'Arms': min(92.0, 58 + (ffmi * 1.1)),
-        };
-      });
-    });
-  }
-
-  Color _getScoreColor(double score) {
-    if (score >= 80) return const Color(0xFF00FF87);
-    if (score >= 65) return Theme.of(context).primaryColor;
-    if (score >= 50) return const Color(0xFFFFB700);
-    return const Color(0xFFFF0055);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader('AI PHOTO PHYSIQUE HEATMAP ANALYZER'),
-          const SizedBox(height: 8),
-
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.3))),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: weightCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Body Weight (kg)', filled: true, fillColor: Color(0xFF101222)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: heightCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Height (cm)', filled: true, fillColor: Color(0xFF101222)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: bodyFatCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Body Fat %', filled: true, fillColor: Color(0xFF101222)),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    DropdownButton<String>(
-                      value: selectedPose,
-                      dropdownColor: const Color(0xFF101222),
-                      items: ['Anterior (Front Pose)', 'Posterior (Back Pose)'].map((p) => DropdownMenuItem(value: p, child: Text(p, style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 11)))).toList(),
-                      onChanged: (v) => setState(() => selectedPose = v!),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.black),
-                      onPressed: isAnalyzing ? null : _runAiPhysiqueScan,
-                      icon: const Icon(Icons.camera_enhance, size: 16),
-                      label: Text(isAnalyzing ? 'SCANNING...' : 'SCAN & MAP PHOTO', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10)),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          Container(
-            height: 320,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF070810),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isAnalyzing ? const Color(0xFFFF0055) : Colors.white12),
-            ),
-            child: isAnalyzing
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: Theme.of(context).primaryColor),
-                        const SizedBox(height: 12),
-                        const Text('ANALYZING MUSCLE CONTOURS & FFMI RATIOS...', style: TextStyle(color: Colors.white70, fontSize: 10, letterSpacing: 1.2)),
-                      ],
-                    ),
-                  )
-                : Stack(
-                    children: [
-                      Center(
-                        child: CustomPaint(
-                          size: const Size(200, 300),
-                          painter: PhysiqueSilhouettePainter(isAnterior: selectedPose.contains('Anterior')),
-                        ),
-                      ),
-                      if (photoLoaded) ...[
-                        _buildHeatmapPin(xRatio: 0.50, yRatio: 0.28, label: 'Chest', score: muscleScores['Chest']!),
-                        _buildHeatmapPin(xRatio: 0.32, yRatio: 0.25, label: 'Shoulders', score: muscleScores['Shoulders']!),
-                        _buildHeatmapPin(xRatio: 0.68, yRatio: 0.25, label: 'Delts', score: muscleScores['Shoulders']!),
-                        _buildHeatmapPin(xRatio: 0.50, yRatio: 0.42, label: 'Abs', score: muscleScores['Abs']!),
-                        _buildHeatmapPin(xRatio: 0.38, yRatio: 0.62, label: 'Quads', score: muscleScores['Quads']!),
-                        _buildHeatmapPin(xRatio: 0.62, yRatio: 0.62, label: 'Lats/Quads', score: muscleScores['Lats']!),
-                      ],
-                      Positioned(
-                        bottom: 8,
-                        left: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), borderRadius: BorderRadius.circular(6)),
-                          child: Row(
-                            children: [
-                              _legendDot('Optimal', const Color(0xFF00FF87)),
-                              const SizedBox(width: 8),
-                              _legendDot('Balanced', Theme.of(context).primaryColor),
-                              const SizedBox(width: 8),
-                              _legendDot('Lagging', const Color(0xFFFF0055)),
-                            ],
-                          ),
-                        ),
-                      )
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 14),
-
-          _buildHeader('BODY WEIGHT vs MUSCLE DENSITY BREAKDOWN'),
-          const SizedBox(height: 8),
-
-          ListView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: muscleScores.entries.map((e) {
-              Color color = _getScoreColor(e.value);
-              String status = e.value >= 80 ? 'Excellent Volume' : (e.value >= 65 ? 'Balanced for Frame' : 'High Hypertrophy Priority');
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.4))),
-                child: Row(
-                  children: [
-                    CircleAvatar(radius: 14, backgroundColor: color.withOpacity(0.2), child: Text('${e.value.toInt()}', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                          Text(status, style: TextStyle(color: Colors.grey[400], fontSize: 9)),
-                        ],
-                      ),
-                    ),
-                    if (e.value < 65)
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF0055), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 8)),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added +3 weekly targeted sets for ${e.key} into Split Builder.')));
-                        },
-                        child: const Text('+ADD TO SPLIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
-                      )
-                  ],
-                ),
-              );
-            }).toList(),
+      appBar: AppBar(
+        title: const Text('Live Workout Session'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _showAddExerciseDialog,
+            tooltip: 'Add Custom Exercise',
           )
         ],
       ),
-    );
-  }
-
-  Widget _buildHeatmapPin({required double xRatio, required double yRatio, required String label, required double score}) {
-    Color color = _getScoreColor(score);
-    return Positioned(
-      left: MediaQuery.of(context).size.width * xRatio - 28,
-      top: 320 * yRatio - 12,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.85),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 8, spreadRadius: 1)],
-        ),
-        child: Text('$label ${score.toInt()}%', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 8)),
-      ),
-    );
-  }
-
-  Widget _legendDot(String text, Color c) {
-    return Row(
-      children: [
-        Container(width: 6, height: 6, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-        const SizedBox(width: 4),
-        Text(text, style: const TextStyle(color: Colors.white70, fontSize: 8)),
-      ],
-    );
-  }
-
-  Widget _buildHeader(String title) {
-    return Text(title, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2));
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TAB 4: ANATOMICAL VOLUME MAP (MEV / MAV / MRV)
-// -----------------------------------------------------------------------------
-class AnatomicalHeatmapTab extends StatefulWidget {
-  const AnatomicalHeatmapTab({super.key});
-
-  @override
-  State<AnatomicalHeatmapTab> createState() => _AnatomicalHeatmapTabState();
-}
-
-class _AnatomicalHeatmapTabState extends State<AnatomicalHeatmapTab> {
-  final Map<String, Map<String, int>> muscleVolumes = {
-    'Chest': {'weeklySets': 16, 'mev': 10, 'mav': 18, 'mrv': 22},
-    'Lats/Back': {'weeklySets': 20, 'mev': 12, 'mav': 20, 'mrv': 25},
-    'Quads': {'weeklySets': 8, 'mev': 8, 'mav': 16, 'mrv': 20},
-    'Hamstrings': {'weeklySets': 12, 'mev': 6, 'mav': 14, 'mrv': 18},
-    'Delts': {'weeklySets': 22, 'mev': 8, 'mav': 22, 'mrv': 26},
-    'Triceps': {'weeklySets': 14, 'mev': 6, 'mav': 14, 'mrv': 18},
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('WEEKLY VOLUME THRESHOLD TRACKER (RP HYPERTROPHY MODEL)', style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-
-          ...muscleVolumes.entries.map((entry) {
-            final name = entry.key;
-            final sets = entry.value['weeklySets']!;
-            final mev = entry.value['mev']!;
-            final mav = entry.value['mav']!;
-            final mrv = entry.value['mrv']!;
-
-            Color statusColor;
-            String statusText;
-            if (sets < mev) {
-              statusColor = const Color(0xFFFF0055);
-              statusText = 'Under Maintenance (Below MEV)';
-            } else if (sets <= mav) {
-              statusColor = const Color(0xFF00FF87);
-              statusText = 'Optimal Growth Zone (MEV-MAV)';
-            } else if (sets <= mrv) {
-              statusColor = Colors.amber;
-              statusText = 'High Overreach (Near MRV)';
-            } else {
-              statusColor = const Color(0xFFFF0055);
-              statusText = 'Overtraining Hazard (Exceeds MRV)';
-            }
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _activeSession.length,
+        itemBuilder: (context, exIdx) {
+          final exercise = _activeSession[exIdx];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 16),
+            child: Padding(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(10), border: Border.all(color: statusColor.withOpacity(0.3))),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                      Text('$sets Weekly Sets', style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11)),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            exercise.name,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            exercise.category,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white38,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.local_fire_department,
+                              color: Colors.orangeAccent,
+                            ),
+                            tooltip: 'Generate Pyramid Warmups',
+                            onPressed: () => _generatePyramidWarmups(exercise),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_sweep,
+                              color: Colors.redAccent,
+                            ),
+                            tooltip: 'Clear All Warmups',
+                            onPressed: () => _removeAllWarmups(exercise),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white38,
+                            ),
+                            tooltip: 'Remove Exercise',
+                            onPressed: () {
+                              setState(() {
+                                _activeSession.removeAt(exIdx);
+                              });
+                            },
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(statusText, style: TextStyle(color: statusColor, fontSize: 9)),
+                  const Divider(),
+
+                  // Set Rows Header
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            'TYPE',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            'WEIGHT',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            'REPS',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            'RPE',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 40), // Delete button space
+                      ],
+                    ),
+                  ),
+
+                  // Individual Set Rows
+                  ...exercise.sets.map((set) {
+                    final displayWeight =
+                        globalSettings.convertWeight(set.weightKg);
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      decoration: BoxDecoration(
+                        color: set.isWarmup
+                            ? Colors.orange.withOpacity(0.08)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              set.isWarmup ? 'Warmup' : 'Working',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: set.isWarmup
+                                    ? Colors.orangeAccent
+                                    : globalSettings.accentColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              '${displayWeight.toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              '${set.reps}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              '${set.rpe}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          // Individual Set Delete Option
+                          IconButton(
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              size: 18,
+                              color: Colors.redAccent,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                exercise.sets.removeWhere((s) => s.id == set.id);
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: (sets / mrv).clamp(0.0, 1.0),
-                    backgroundColor: Colors.white10,
-                    color: statusColor,
-                    minHeight: 6,
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        exercise.sets.add(
+                          ExerciseSet(
+                            id: 's_${DateTime.now().millisecondsSinceEpoch}',
+                            weightKg: exercise.sets.isNotEmpty
+                                ? exercise.sets.last.weightKg
+                                : 60.0,
+                            reps: 8,
+                            rpe: 8.0,
+                          ),
+                        );
+                      });
+                    },
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Working Set'),
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('MEV: $mev', style: const TextStyle(color: Colors.grey, fontSize: 8)),
-                      Text('MAV: $mav', style: const TextStyle(color: Colors.grey, fontSize: 8)),
-                      Text('MRV: $mrv', style: const TextStyle(color: Colors.grey, fontSize: 8)),
-                    ],
-                  )
                 ],
               ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TAB 5: APRE 3/6/10 & LOAD-VELOCITY ENGINE
-// -----------------------------------------------------------------------------
-class ApreVbtTab extends StatefulWidget {
-  const ApreVbtTab({super.key});
-
-  @override
-  State<ApreVbtTab> createState() => _ApreVbtTabState();
-}
-
-class _ApreVbtTabState extends State<ApreVbtTab> {
-  double currentWorkingWeight = 100.0;
-  int repsPerformed = 8;
-  String apreProtocol = 'APRE 6-RM Protocol';
-
-  double _calculateNextSetAdjustment() {
-    if (apreProtocol == 'APRE 6-RM Protocol') {
-      if (repsPerformed < 4) return -5.0;
-      if (repsPerformed < 6) return -2.5;
-      if (repsPerformed == 6) return 0.0;
-      if (repsPerformed <= 8) return 2.5;
-      return 5.0;
-    }
-    return 0.0;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    double adjustment = _calculateNextSetAdjustment();
-    double nextWeight = currentWorkingWeight + adjustment;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('AUTOREGULATED PROGRESSIVE RESISTANCE EXERCISE (APRE)', style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.3))),
-            child: Column(
-              children: [
-                DropdownButton<String>(
-                  value: apreProtocol,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF101222),
-                  items: ['APRE 3-RM Protocol', 'APRE 6-RM Protocol', 'APRE 10-RM Protocol'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                  onChanged: (v) => setState(() => apreProtocol = v!),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SpinBoxWidget(
-                        value: currentWorkingWeight,
-                        step: 2.5,
-                        onChanged: (v) => setState(() => currentWorkingWeight = v),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: SpinBoxWidget(
-                        value: repsPerformed.toDouble(),
-                        step: 1.0,
-                        onChanged: (v) => setState(() => repsPerformed = v.toInt()),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFF101222), borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('NEXT SET ADJUSTED LOAD:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                      Text('$nextWeight kg (${adjustment >= 0 ? "+$adjustment" : adjustment} kg)', style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                    ],
-                  ),
-                )
-              ],
             ),
-          )
-        ],
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddExerciseDialog,
+        backgroundColor: globalSettings.accentColor,
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Custom Exercise'),
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// TAB 6: ACWR STRESS ENGINE (BANISTER EWMA)
-// -----------------------------------------------------------------------------
-class BanisterTab extends StatefulWidget {
-  const BanisterTab({super.key});
+// ============================================================================
+// TAB 3: BARBELL PLATE VISUALIZER & PAINTER
+// ============================================================================
+
+class BarbellVisualizerTab extends StatefulWidget {
+  const BarbellVisualizerTab({super.key});
 
   @override
-  State<BanisterTab> createState() => _BanisterTabState();
+  State<BarbellVisualizerTab> createState() => _BarbellVisualizerTabState();
 }
 
-class _BanisterTabState extends State<BanisterTab> {
-  double acuteLoad = 1250.0; // 7-day EWMA
-  double chronicLoad = 1000.0; // 28-day EWMA
+class _BarbellVisualizerTabState extends State<BarbellVisualizerTab> {
+  double _targetWeightKg = 100.0;
 
   @override
   Widget build(BuildContext context) {
-    double acwr = acuteLoad / chronicLoad;
+    final double barWeight = globalSettings.defaultBarbellWeightKg;
+    final double weightPerSideKg = math.max(0, (_targetWeightKg - barWeight) / 2);
 
-    Color acwrColor;
-    String statusLabel;
-    if (acwr < 0.8) {
-      acwrColor = Colors.blueAccent;
-      statusLabel = 'UNDERTRAINING (Deconditioning Risk)';
-    } else if (acwr <= 1.3) {
-      acwrColor = const Color(0xFF00FF87);
-      statusLabel = 'SWEET SPOT (Optimal Progression)';
-    } else if (acwr <= 1.5) {
-      acwrColor = Colors.amber;
-      statusLabel = 'HIGH DANGER ZONE (Overreach Alert)';
-    } else {
-      acwrColor = const Color(0xFFFF0055);
-      statusLabel = 'CRITICAL SPIKE (Trigger Deload Week)';
-    }
+    final displayTarget = globalSettings.convertWeight(_targetWeightKg);
+    final displayBar = globalSettings.convertWeight(barWeight);
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('ACUTE-TO-CHRONIC WORKLOAD RATIO (ACWR / EWMA)', style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12), border: Border.all(color: acwrColor.withOpacity(0.4))),
-            child: Column(
-              children: [
-                Text(acwr.toStringAsFixed(2), style: TextStyle(color: acwrColor, fontSize: 36, fontWeight: FontWeight.w900)),
-                Text(statusLabel, style: TextStyle(color: acwrColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('ACUTE FATIGUE (7d ATL)', style: TextStyle(fontSize: 9, color: Colors.grey)),
-                          Slider(value: acuteLoad, min: 500, max: 2500, onChanged: (v) => setState(() => acuteLoad = v)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('CHRONIC FITNESS (28d CTL)', style: TextStyle(fontSize: 9, color: Colors.grey)),
-                          Slider(value: chronicLoad, min: 500, max: 2500, onChanged: (v) => setState(() => chronicLoad = v)),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TAB 7: MULTI-EQUATION 1RM & BARBELL PLATE PAINTER
-// -----------------------------------------------------------------------------
-class PlateMathTab extends StatefulWidget {
-  const PlateMathTab({super.key});
-
-  @override
-  State<PlateMathTab> createState() => _PlateMathTabState();
-}
-
-class _PlateMathTabState extends State<PlateMathTab> {
-  double targetWeight = 140.0;
-  double barWeight = 20.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('BARBELL PLATE LOADING & VISUAL PAINTER', style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Target Weight (kg):', style: TextStyle(fontSize: 11)),
-                    SizedBox(width: 120, child: SpinBoxWidget(value: targetWeight, step: 2.5, onChanged: (v) => setState(() => targetWeight = v))),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Barbell Type:', style: TextStyle(fontSize: 11)),
-                    DropdownButton<double>(
-                      value: barWeight,
-                      dropdownColor: const Color(0xFF101222),
-                      items: const [
-                        DropdownMenuItem(value: 20.0, child: Text('Olympic Bar (20kg)')),
-                        DropdownMenuItem(value: 15.0, child: Text('Women\'s Bar (15kg)')),
-                        DropdownMenuItem(value: 25.0, child: Text('Trap Bar (25kg)')),
-                      ],
-                      onChanged: (v) => setState(() => barWeight = v!),
-                    )
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          Container(
-            height: 120,
-            width: double.infinity,
-            decoration: BoxDecoration(color: const Color(0xFF06060D), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white12)),
-            child: CustomPaint(
-              painter: BarbellPlatePainter(targetWeight: targetWeight, barWeight: barWeight, isKg: true),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// CUSTOM PAINTER FOR BARBELL PLATES
-// -----------------------------------------------------------------------------
-class BarbellPlatePainter extends CustomPainter {
-  final double targetWeight;
-  final double barWeight;
-  final bool isKg;
-
-  BarbellPlatePainter({required this.targetWeight, required this.barWeight, required this.isKg});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double sideWeight = (targetWeight - barWeight) / 2;
-    if (sideWeight <= 0) return;
-
-    final List<double> availablePlates = isKg ? [25, 20, 15, 10, 5, 2.5, 1.25] : [45, 35, 25, 10, 5, 2.5];
-    final Map<double, Color> plateColors = {
-      25: Colors.red,
-      20: Colors.blue,
-      15: Colors.yellow,
-      10: Colors.green,
-      5: Colors.white,
-      2.5: Colors.black,
-      1.25: Colors.grey,
-    };
-
-    double remaining = sideWeight;
-    List<double> platesToDraw = [];
-
-    for (double p in availablePlates) {
-      while (remaining >= p) {
-        platesToDraw.add(p);
-        remaining -= p;
-      }
-    }
-
-    final Paint barPaint = Paint()..color = Colors.grey[400]!..style = PaintingStyle.fill;
-    canvas.drawRect(Rect.fromLTWH(0, size.height / 2 - 4, size.width, 8), barPaint);
-
-    double currentX = size.width / 2 + 10;
-    for (double plate in platesToDraw) {
-      double plateHeight = min(size.height * 0.85, 30 + (plate * 2.5));
-      Paint pPaint = Paint()..color = plateColors[plate] ?? Colors.cyan;
-
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(currentX, (size.height - plateHeight) / 2, 10, plateHeight),
-          const Radius.circular(2),
-        ),
-        pPaint,
-      );
-      currentX += 12.0;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-// -----------------------------------------------------------------------------
-// CUSTOM PAINTER FOR PHYSIQUE SILHOUETTE
-// -----------------------------------------------------------------------------
-class PhysiqueSilhouettePainter extends CustomPainter {
-  final bool isAnterior;
-  PhysiqueSilhouettePainter({required this.isAnterior});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white12
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final fillPaint = Paint()
-      ..color = const Color(0xFF101322)
-      ..style = PaintingStyle.fill;
-
-    double cx = size.width / 2;
-
-    canvas.drawCircle(Offset(cx, 30), 16, fillPaint);
-    canvas.drawCircle(Offset(cx, 30), 16, paint);
-
-    Path torso = Path()
-      ..moveTo(cx - 38, 54)
-      ..lineTo(cx + 38, 54)
-      ..lineTo(cx + 24, 130)
-      ..lineTo(cx - 24, 130)
-      ..close();
-    canvas.drawPath(torso, fillPaint);
-    canvas.drawPath(torso, paint);
-
-    Path legs = Path()
-      ..moveTo(cx - 22, 130)
-      ..lineTo(cx - 4, 130)
-      ..lineTo(cx - 8, 250)
-      ..lineTo(cx - 24, 250)
-      ..close()
-      ..moveTo(cx + 4, 130)
-      ..lineTo(cx + 22, 130)
-      ..lineTo(cx + 24, 250)
-      ..lineTo(cx + 8, 250)
-      ..close();
-    canvas.drawPath(legs, fillPaint);
-    canvas.drawPath(legs, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// -----------------------------------------------------------------------------
-// HELPER WIDGETS & AUXILIARY SCREENS
-// -----------------------------------------------------------------------------
-class SpinBoxWidget extends StatelessWidget {
-  final double value;
-  final double step;
-  final Function(double) onChanged;
-
-  const SpinBoxWidget({super.key, required this.value, required this.step, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(color: const Color(0xFF101222), borderRadius: BorderRadius.circular(8)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          InkWell(onTap: () => onChanged(max(0, value - step)), child: const Icon(Icons.remove, size: 16, color: Colors.white70)),
-          Text(value.toStringAsFixed(step < 1 ? 1 : 0), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-          InkWell(onTap: () => onChanged(value + step), child: const Icon(Icons.add, size: 16, color: Colors.white70)),
-        ],
-      ),
-    );
-  }
-}
-
-class EngineDocsScreen extends StatelessWidget {
-  const EngineDocsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ENGINE MANUAL & FORMULAS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(14.0),
+      appBar: AppBar(title: const Text('Barbell Plate Loader')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildDocCard(
-              context,
-              title: 'Custom Split Builder & Deload Microcycles',
-              icon: Icons.alt_route,
-              color: Theme.of(context).primaryColor,
-              content: 'Build custom split routines with target volume sets and RPE goals. Deload mode auto-scales set volume by -50% and weight loads by -20%.',
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Text(
+                      'Target Weight: ${displayTarget.toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Bar Weight: ${displayBar.toStringAsFixed(1)} ${globalSettings.weightUnit} | Each Side: ${globalSettings.convertWeight(weightPerSideKg).toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                    Slider(
+                      value: _targetWeightKg,
+                      min: barWeight,
+                      max: 300,
+                      divisions: 112,
+                      onChanged: (v) => setState(() => _targetWeightKg = v),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(height: 10),
-            _buildDocCard(
-              context,
-              title: 'AI Photo Physique Heatmapping',
-              icon: Icons.linked_camera,
-              color: const Color(0xFF00FF87),
-              content: 'Scans user photos against FFMI and bodyweight standards to highlight lagging or overdeveloped muscle zones directly on silhouette overlays.',
+            const SizedBox(height: 24),
+
+            // Barbell Visual Canvas
+            Container(
+              height: 220,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E141E),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: CustomPaint(
+                painter: BarbellPlatePainter(
+                  weightPerSideKg: weightPerSideKg,
+                ),
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildDocCard(BuildContext context, {required String title, required IconData icon, required Color color, required String content}) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFF0B0C16), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withOpacity(0.3))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 18),
-              const SizedBox(width: 8),
-              Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
-            ],
+class BarbellPlatePainter extends CustomPainter {
+  final double weightPerSideKg;
+
+  BarbellPlatePainter({required this.weightPerSideKg});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.height / 2;
+    final barPaint = Paint()..color = const Color(0xFFB0BEC5);
+
+    // Main Sleeve
+    canvas.drawRect(
+      Rect.fromLTWH(20, center - 6, size.width - 40, 12),
+      barPaint,
+    );
+
+    // Collars
+    canvas.drawRect(
+      Rect.fromLTWH(80, center - 16, 12, 32),
+      barPaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(size.width - 92, center - 16, 12, 32),
+      barPaint,
+    );
+
+    // Calculate Plates (Standard Olympics: 25kg, 20kg, 15kg, 10kg, 5kg, 2.5kg, 1.25kg)
+    double remaining = weightPerSideKg;
+    final Map<double, Color> plateColors = {
+      25.0: const Color(0xFFFF1744), // Red
+      20.0: const Color(0xFF2979FF), // Blue
+      15.0: const Color(0xFFFFEA00), // Yellow
+      10.0: const Color(0xFF00E676), // Green
+      5.0: const Color(0xFFFFFFFF), // White
+      2.5: const Color(0xFF212121), // Black
+      1.25: const Color(0xFF78909C), // Silver
+    };
+
+    double currentXLeft = 80 - 10;
+    double currentXRight = size.width - 80;
+
+    plateColors.forEach((weight, color) {
+      while (remaining >= weight) {
+        remaining -= weight;
+        final double height = math.min(160, 60 + (weight * 4));
+        final double width = math.max(6, weight * 0.4);
+
+        final p = Paint()..color = color;
+
+        // Draw left side plate
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(currentXLeft - width, center - (height / 2), width, height),
+            const Radius.circular(3),
           ),
-          const Divider(color: Colors.white10, height: 12),
-          Text(content, style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.4)),
+          p,
+        );
+
+        // Draw right side plate
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(currentXRight, center - (height / 2), width, height),
+            const Radius.circular(3),
+          ),
+          p,
+        );
+
+        currentXLeft -= (width + 2);
+        currentXRight += (width + 2);
+      }
+    });
+  }
+
+  @override
+  bool shouldRepaint(covariant BarbellPlatePainter oldDelegate) {
+    return oldDelegate.weightPerSideKg != weightPerSideKg;
+  }
+}
+
+// ============================================================================
+// TAB 4: ACWR & BANISTER FATIGUE GAUGE
+// ============================================================================
+
+class BanisterFatigueTab extends StatefulWidget {
+  const BanisterFatigueTab({super.key});
+
+  @override
+  State<BanisterFatigueTab> createState() => _BanisterFatigueTabState();
+}
+
+class _BanisterFatigueTabState extends State<BanisterFatigueTab> {
+  double _atl7Days = 850; // Acute Training Load
+  double _ctl28Days = 600; // Chronic Training Load
+
+  double get _acwr => _ctl28Days > 0 ? _atl7Days / _ctl28Days : 0;
+
+  String get _acwrStatus {
+    if (_acwr < 0.8) return 'Under-training Risk';
+    if (_acwr <= 1.3) return 'Optimal Progression Zone (Sweet Spot)';
+    if (_acwr <= 1.5) return 'Overreaching Zone';
+    return 'CRITICAL INJURY SPIKE ZONE';
+  }
+
+  Color get _acwrColor {
+    if (_acwr < 0.8) return Colors.blueAccent;
+    if (_acwr <= 1.3) return const Color(0xFF00E676);
+    if (_acwr <= 1.5) return Colors.orangeAccent;
+    return const Color(0xFFFF1744);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Banister ACWR & EWMA Fatigue')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Acute-to-Chronic Workload Ratio',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _acwr.toStringAsFixed(2),
+                      style: TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: _acwrColor,
+                      ),
+                    ),
+                    Text(
+                      _acwrStatus,
+                      style: TextStyle(
+                        color: _acwrColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('ATL (7d Fatigue): ${_atl7Days.toInt()}'),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _atl7Days,
+                            min: 100,
+                            max: 2000,
+                            onChanged: (v) => setState(() => _atl7Days = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('CTL (28d Fitness): ${_ctl28Days.toInt()}'),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _ctl28Days,
+                            min: 100,
+                            max: 2000,
+                            onChanged: (v) => setState(() => _ctl28Days = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TAB 5: DOCUMENTATION & EXACT FORMULAS GUIDE
+// ============================================================================
+
+class FormulaInfoTab extends StatelessWidget {
+  const FormulaInfoTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Documentation & Math Formulas')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [
+          _DocSectionCard(
+            title: '1. AI Photo Heatmap & FFMI Formula',
+            description:
+                'Calculates Lean Body Mass (LBM) and Fat-Free Mass Index normalized for height.',
+            formulaLatex: r'''
+\text{LBM} = \text{Weight (kg)} \times \left(1 - \frac{\text{BodyFat \%}}{100}\right)
+
+\text{FFMI}_{\text{raw}} = \frac{\text{LBM (kg)}}{\text{Height (m)}^2}
+
+\text{FFMI}_{\text{norm}} = \text{FFMI}_{\text{raw}} + 6.1 \times (1.80 - \text{Height (m)})
+''',
+          ),
+          _DocSectionCard(
+            title: '2. ACWR & Banister EWMA Fatigue Engine',
+            description:
+                'Models Acute Training Load (ATL, 7 days) versus Chronic Training Load (CTL, 28 days) using Exponentially Weighted Moving Averages.',
+            formulaLatex: r'''
+\text{ACWR} = \frac{\text{ATL}_{7\text{d}}}{\text{CTL}_{28\text{d}}}
+
+\text{EWMA}_t = \text{Load}_t \times \lambda + \text{EWMA}_{t-1} \times (1 - \lambda), \quad \lambda = \frac{2}{N + 1}
+''',
+          ),
+          _DocSectionCard(
+            title: '3. Pyramid Warmup Set Distribution',
+            description:
+                'Calculates non-fatiguing sub-maximal warmup loads based on top working set load ($w_{\text{top}}$).',
+            formulaLatex: r'''
+\text{Set 1} = 40\% \times w_{\text{top}} \quad (8 \text{ reps})
+\text{Set 2} = 60\% \times w_{\text{top}} \quad (5 \text{ reps})
+\text{Set 3} = 75\% \times w_{\text{top}} \quad (3 \text{ reps})
+\text{Set 4} = 90\% \times w_{\text{top}} \quad (1 \text{ rep})
+''',
+          ),
+          _DocSectionCard(
+            title: '4. APRE Load Adjustment Matrix',
+            description:
+                'Autoregulated Progressive Resistance Exercise load adjustments based on rep completion vs target.',
+            formulaLatex: r'''
+\Delta \text{Weight} = \begin{cases} 
+-2.5\text{kg to } -5\text{kg} & \text{if reps} < \text{target} - 2 \\
+\pm 0\text{kg} & \text{if reps} = \text{target} \\
++2.5\text{kg to } +5\text{kg} & \text{if reps} > \text{target} + 2 
+\end{cases}
+''',
+          ),
+          _DocSectionCard(
+            title: '5. Volume Thresholds (MEV / MAV / MRV)',
+            description:
+                'Tracks weekly set volume against physiological adaptation bands.',
+            formulaLatex: r'''
+\text{MEV (Minimum Effective Volume)} \approx 6\text{–}10 \text{ sets/wk}
+\text{MAV (Maximum Adaptive Volume)} \approx 12\text{–}20 \text{ sets/wk}
+\text{MRV (Maximum Recoverable Volume)} \approx 22\text{–}25+ \text{ sets/wk}
+''',
+          ),
         ],
       ),
     );
   }
 }
 
-class SettingsScreen extends StatelessWidget {
-  final Function(Color) onAccentChanged;
-  const SettingsScreen({super.key, required this.onAccentChanged});
+class _DocSectionCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final String formulaLatex;
+
+  const _DocSectionCard({
+    required this.title,
+    required this.description,
+    required this.formulaLatex,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final List<Color> accents = [
-      const Color(0xFF00F0FF),
-      const Color(0xFF00FF87),
-      const Color(0xFFFF0055),
-      const Color(0xFFFFB700),
-      const Color(0xFF7000FF),
-    ];
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('SETTINGS & PREFERENCES', style: TextStyle(fontSize: 13))),
-      body: ListView(
-        padding: const EdgeInsets.all(14.0),
-        children: [
-          const Text('SYSTEM ACCENT COLOR', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Row(
-            children: accents.map((c) {
-              return GestureDetector(
-                onTap: () => onAccentChanged(c),
-                child: Container(
-                  margin: const EdgeInsets.only(right: 12),
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 2)),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: globalSettings.accentColor,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: const TextStyle(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black38,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Text(
+                formulaLatex.trim(),
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: Color(0xFF80D8FF),
                 ),
-              );
-            }).toList(),
-          )
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TAB 6: SETTINGS PAGE (CUSTOMIZATION)
+// ============================================================================
+
+class SettingsTab extends StatefulWidget {
+  const SettingsTab({super.key});
+
+  @override
+  State<SettingsTab> createState() => _SettingsTabState();
+}
+
+class _SettingsTabState extends State<SettingsTab> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Engine Settings & Preferences')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Units
+          Card(
+            child: ListTile(
+              title: const Text('Unit System'),
+              subtitle: Text(
+                globalSettings.unitSystem == UnitSystem.metric
+                    ? 'Metric (Kilograms - kg)'
+                    : 'Imperial (Pounds - lbs)',
+              ),
+              trailing: Switch(
+                value: globalSettings.unitSystem == UnitSystem.imperial,
+                activeColor: globalSettings.accentColor,
+                onChanged: (v) {
+                  globalSettings.updateSettings(
+                    unitSystem: v ? UnitSystem.imperial : UnitSystem.metric,
+                  );
+                },
+              ),
+            ),
+          ),
+
+          // Barbell Weight
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Default Barbell Weight: ${globalSettings.convertWeight(globalSettings.defaultBarbellWeightKg).toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<double>(
+                    segments: const [
+                      ButtonSegment(value: 15.0, label: Text('15kg (Women)')),
+                      ButtonSegment(value: 20.0, label: Text('20kg (Olympic)')),
+                      ButtonSegment(value: 25.0, label: Text('25kg (Trap)')),
+                    ],
+                    selected: {globalSettings.defaultBarbellWeightKg},
+                    onSelectionChanged: (val) {
+                      globalSettings.updateSettings(
+                        defaultBarbellWeightKg: val.first,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Rest Timer Slider
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Default Rest Timer: ${globalSettings.defaultRestTimerSeconds} seconds',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Slider(
+                    value: globalSettings.defaultRestTimerSeconds.toDouble(),
+                    min: 30,
+                    max: 300,
+                    divisions: 27,
+                    onChanged: (v) {
+                      globalSettings.updateSettings(
+                        defaultRestTimerSeconds: v.toInt(),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Accent Color
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Theme Accent Color',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _colorPickerTile(const Color(0xFF00E676)), // Green
+                      _colorPickerTile(const Color(0xFF00E5FF)), // Cyan
+                      _colorPickerTile(const Color(0xFFFF9100)), // Orange
+                      _colorPickerTile(const Color(0xFFD500F9)), // Purple
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Haptics
+          Card(
+            child: ListTile(
+              title: const Text('Haptic Vibration Alerts'),
+              subtitle: const Text('Vibrate on timer, set logs, & generator'),
+              trailing: Switch(
+                value: globalSettings.hapticsEnabled,
+                activeColor: globalSettings.accentColor,
+                onChanged: (v) {
+                  globalSettings.updateSettings(hapticsEnabled: v);
+                },
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _colorPickerTile(Color color) {
+    final isSelected = globalSettings.accentColor.value == color.value;
+    return GestureDetector(
+      onTap: () => globalSettings.updateSettings(accentColor: color),
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: isSelected
+              ? Border.all(color: Colors.white, width: 3)
+              : Border.all(color: Colors.transparent),
+        ),
       ),
     );
   }
