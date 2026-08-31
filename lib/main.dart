@@ -90,9 +90,9 @@ class ExerciseModel {
 
 class MuscleHeatZone {
   final String muscleName;
-  final Offset relativePos; // Normalized 0.0 - 1.0 coordinates on photo canvas
-  final double score; // 0.0 (severely lagging) to 1.0 (peak definition)
-  final String status; // Lagging, Balanced, Optimal
+  final Offset relativePos;
+  final double score;
+  final String status;
 
   MuscleHeatZone({
     required this.muscleName,
@@ -102,9 +102,9 @@ class MuscleHeatZone {
   });
 
   Color get color {
-    if (score < 0.45) return const Color(0xFFFF1744); // Red: Lagging
-    if (score < 0.75) return const Color(0xFFFFD600); // Yellow: Balanced
-    return const Color(0xFF00E676); // Green: Optimal / Dominant
+    if (score < 0.45) return const Color(0xFFFF1744);
+    if (score < 0.75) return const Color(0xFFFFD600);
+    return const Color(0xFF00E676);
   }
 }
 
@@ -311,7 +311,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Bio Input Bar
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -371,8 +370,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
               ),
             ),
             const SizedBox(height: 12),
-
-            // FFMI Score Header
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -422,8 +419,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Main Canvas Area
             if (_isAnalyzing)
               const SizedBox(
                 height: 360,
@@ -449,7 +444,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: Colors.white24,
-                      style: BorderStyle.solid,
                     ),
                   ),
                   child: const Column(
@@ -493,12 +487,10 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                     ),
                     child: Stack(
                       children: [
-                        // Background Body Silhouette Representation
                         CustomPaint(
                           size: Size.infinite,
                           painter: PhysiqueSilhouettePainter(),
                         ),
-                        // Heatmap Overlay Nodes
                         for (var zone in _zones)
                           Positioned(
                             left: zone.relativePos.dx * 320,
@@ -551,7 +543,6 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Color Legend
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -632,14 +623,13 @@ class PhysiqueSilhouettePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      color = Colors.white.withOpacity(0.08)
+      ..color = Colors.white.withOpacity(0.08)
       ..style = PaintingStyle.fill;
 
     final center = size.width / 2;
 
-    // Simplified Body Visual Lines for Canvas Overlay Representation
     final path = Path()
-      ..moveTo(center, 40) // Head
+      ..moveTo(center, 40)
       ..addOval(
         Rect.fromCenter(
           center: Offset(center, 50),
@@ -647,14 +637,14 @@ class PhysiqueSilhouettePainter extends CustomPainter {
           height: 44,
         ),
       )
-      ..moveTo(center - 18, 72) // Neck
-      ..lineTo(center - 55, 95) // Shoulders
-      ..lineTo(center - 45, 170) // Torso
-      ..lineTo(center - 35, 230) // Waist
-      ..lineTo(center - 42, 330) // Left Leg
+      ..moveTo(center - 18, 72)
+      ..lineTo(center - 55, 95)
+      ..lineTo(center - 45, 170)
+      ..lineTo(center - 35, 230)
+      ..lineTo(center - 42, 330)
       ..lineTo(center - 10, 330)
-      ..lineTo(center, 220) // Inseam
-      ..lineTo(center + 10, 330) // Right Leg
+      ..lineTo(center, 220)
+      ..lineTo(center + 10, 330)
       ..lineTo(center + 42, 330)
       ..lineTo(center + 35, 230)
       ..lineTo(center + 45, 170)
@@ -787,7 +777,6 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
 
     final double topWeight = topSet.weightKg;
 
-    // 40% x 8, 60% x 5, 75% x 3, 90% x 1
     final warmups = [
       ExerciseSet(
         id: 'w1_${DateTime.now().millisecondsSinceEpoch}',
@@ -920,8 +909,6 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
                     ],
                   ),
                   const Divider(),
-
-                  // Set Rows Header
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 4),
                     child: Row(
@@ -966,12 +953,10 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
                             ),
                           ),
                         ),
-                        SizedBox(width: 40), // Delete button space
+                        SizedBox(width: 40),
                       ],
                     ),
                   ),
-
-                  // Individual Set Rows
                   ...exercise.sets.map((set) {
                     final displayWeight =
                         globalSettings.convertWeight(set.weightKg);
@@ -1021,7 +1006,6 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
                               style: const TextStyle(fontSize: 13),
                             ),
                           ),
-                          // Individual Set Delete Option
                           IconButton(
                             icon: const Icon(
                               Icons.remove_circle_outline,
@@ -1038,7 +1022,6 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
                       ),
                     );
                   }),
-
                   const SizedBox(height: 8),
                   TextButton.icon(
                     onPressed: () {
@@ -1131,8 +1114,6 @@ class _BarbellVisualizerTabState extends State<BarbellVisualizerTab> {
               ),
             ),
             const SizedBox(height: 24),
-
-            // Barbell Visual Canvas
             Container(
               height: 220,
               width: double.infinity,
@@ -1163,13 +1144,11 @@ class BarbellPlatePainter extends CustomPainter {
     final center = size.height / 2;
     final barPaint = Paint()..color = const Color(0xFFB0BEC5);
 
-    // Main Sleeve
     canvas.drawRect(
       Rect.fromLTWH(20, center - 6, size.width - 40, 12),
       barPaint,
     );
 
-    // Collars
     canvas.drawRect(
       Rect.fromLTWH(80, center - 16, 12, 32),
       barPaint,
@@ -1179,16 +1158,15 @@ class BarbellPlatePainter extends CustomPainter {
       barPaint,
     );
 
-    // Calculate Plates (Standard Olympics: 25kg, 20kg, 15kg, 10kg, 5kg, 2.5kg, 1.25kg)
     double remaining = weightPerSideKg;
     final Map<double, Color> plateColors = {
-      25.0: const Color(0xFFFF1744), // Red
-      20.0: const Color(0xFF2979FF), // Blue
-      15.0: const Color(0xFFFFEA00), // Yellow
-      10.0: const Color(0xFF00E676), // Green
-      5.0: const Color(0xFFFFFFFF), // White
-      2.5: const Color(0xFF212121), // Black
-      1.25: const Color(0xFF78909C), // Silver
+      25.0: const Color(0xFFFF1744),
+      20.0: const Color(0xFF2979FF),
+      15.0: const Color(0xFFFFEA00),
+      10.0: const Color(0xFF00E676),
+      5.0: const Color(0xFFFFFFFF),
+      2.5: const Color(0xFF212121),
+      1.25: const Color(0xFF78909C),
     };
 
     double currentXLeft = 80 - 10;
@@ -1202,7 +1180,6 @@ class BarbellPlatePainter extends CustomPainter {
 
         final p = Paint()..color = color;
 
-        // Draw left side plate
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromLTWH(currentXLeft - width, center - (height / 2), width, height),
@@ -1211,7 +1188,6 @@ class BarbellPlatePainter extends CustomPainter {
           p,
         );
 
-        // Draw right side plate
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromLTWH(currentXRight, center - (height / 2), width, height),
@@ -1244,8 +1220,8 @@ class BanisterFatigueTab extends StatefulWidget {
 }
 
 class _BanisterFatigueTabState extends State<BanisterFatigueTab> {
-  double _atl7Days = 850; // Acute Training Load
-  double _ctl28Days = 600; // Chronic Training Load
+  double _atl7Days = 850;
+  double _ctl28Days = 600;
 
   double get _acwr => _ctl28Days > 0 ? _atl7Days / _ctl28Days : 0;
 
@@ -1499,7 +1475,6 @@ class _SettingsTabState extends State<SettingsTab> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Units
           Card(
             child: ListTile(
               title: const Text('Unit System'),
@@ -1519,8 +1494,6 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
             ),
           ),
-
-          // Barbell Weight
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1549,8 +1522,6 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
             ),
           ),
-
-          // Rest Timer Slider
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1576,8 +1547,6 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
             ),
           ),
-
-          // Accent Color
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1592,18 +1561,16 @@ class _SettingsTabState extends State<SettingsTab> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      _colorPickerTile(const Color(0xFF00E676)), // Green
-                      _colorPickerTile(const Color(0xFF00E5FF)), // Cyan
-                      _colorPickerTile(const Color(0xFFFF9100)), // Orange
-                      _colorPickerTile(const Color(0xFFD500F9)), // Purple
+                      _colorPickerTile(const Color(0xFF00E676)),
+                      _colorPickerTile(const Color(0xFF00E5FF)),
+                      _colorPickerTile(const Color(0xFFFF9100)),
+                      _colorPickerTile(const Color(0xFFD500F9)),
                     ],
                   ),
                 ],
               ),
             ),
           ),
-
-          // Haptics
           Card(
             child: ListTile(
               title: const Text('Haptic Vibration Alerts'),
