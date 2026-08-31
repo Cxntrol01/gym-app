@@ -123,7 +123,19 @@ class _PhysiqueEngineAppState extends State<PhysiqueEngineApp> {
   @override
   void initState() {
     super.initState();
-    globalSettings.addListener(() => setState(() {}));
+    globalSettings.addListener(_onSettingsChange);
+  }
+
+  @override
+  void dispose() {
+    globalSettings.removeListener(_onSettingsChange);
+    super.dispose();
+  }
+
+  void _onSettingsChange() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -161,13 +173,13 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _tabs = [
-    const PhotoPhysiqueHeatmapTab(),
-    const LiveTrackerTab(),
-    const BarbellVisualizerTab(),
-    const BanisterFatigueTab(),
-    const FormulaInfoTab(),
-    const SettingsTab(),
+  final List<Widget> _tabs = const [
+    PhotoPhysiqueHeatmapTab(),
+    LiveTrackerTab(),
+    BarbellVisualizerTab(),
+    BanisterFatigueTab(),
+    FormulaInfoTab(),
+    SettingsTab(),
   ];
 
   @override
@@ -241,6 +253,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
     });
 
     Future.delayed(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
       setState(() {
         _hasUploadedPhoto = true;
         _isAnalyzing = false;
@@ -704,6 +717,12 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
     'Core',
   ];
 
+  @override
+  void dispose() {
+    _customExerciseController.dispose();
+    super.dispose();
+  }
+
   void _addCustomExercise() {
     if (_customExerciseController.text.trim().isEmpty) return;
     setState(() {
@@ -730,39 +749,47 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
   void _showAddExerciseDialog() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add Custom Exercise'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _customExerciseController,
-              decoration: const InputDecoration(
-                labelText: 'Exercise Name',
-                hintText: 'e.g. Bulgarian Split Squat',
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Add Custom Exercise'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _customExerciseController,
+                  decoration: const InputDecoration(
+                    labelText: 'Exercise Name',
+                    hintText: 'e.g. Bulgarian Split Squat',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _selectedCategory,
+                  items: _categories
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setDialogState(() => _selectedCategory = v);
+                    }
+                  },
+                  decoration: const InputDecoration(labelText: 'Muscle Group'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
               ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedCategory,
-              items: _categories
-                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                  .toList(),
-              onChanged: (v) => setState(() => _selectedCategory = v!),
-              decoration: const InputDecoration(labelText: 'Muscle Group'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: _addCustomExercise,
-            child: const Text('Add Exercise'),
-          ),
-        ],
+              ElevatedButton(
+                onPressed: _addCustomExercise,
+                child: const Text('Add Exercise'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1103,7 +1130,7 @@ class _BarbellVisualizerTabState extends State<BarbellVisualizerTab> {
                       style: const TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                     Slider(
-                      value: _targetWeightKg,
+                      value: math.max(_targetWeightKg, barWeight),
                       min: barWeight,
                       max: 300,
                       divisions: 112,
@@ -1341,55 +1368,52 @@ class FormulaInfoTab extends StatelessWidget {
             title: '1. AI Photo Heatmap & FFMI Formula',
             description:
                 'Calculates Lean Body Mass (LBM) and Fat-Free Mass Index normalized for height.',
-            formulaLatex: r'''
-\text{LBM} = \text{Weight (kg)} \times \left(1 - \frac{\text{BodyFat \%}}{100}\right)
-
-\text{FFMI}_{\text{raw}} = \frac{\text{LBM (kg)}}{\text{Height (m)}^2}
-
-\text{FFMI}_{\text{norm}} = \text{FFMI}_{\text{raw}} + 6.1 \times (1.80 - \text{Height (m)})
+            formulaLatex: '''
+LBM = Weight (kg) * (1 - (BodyFat % / 100))
+FFMI_raw = LBM (kg) / (Height (m)^2)
+FFMI_norm = FFMI_raw + 6.1 * (1.80 - Height (m))
 ''',
           ),
           _DocSectionCard(
             title: '2. ACWR & Banister EWMA Fatigue Engine',
             description:
                 'Models Acute Training Load (ATL, 7 days) versus Chronic Training Load (CTL, 28 days) using Exponentially Weighted Moving Averages.',
-            formulaLatex: r'''
-\text{ACWR} = \frac{\text{ATL}_{7\text{d}}}{\text{CTL}_{28\text{d}}}
-
-\text{EWMA}_t = \text{Load}_t \times \lambda + \text{EWMA}_{t-1} \times (1 - \lambda), \quad \lambda = \frac{2}{N + 1}
+            formulaLatex: '''
+ACWR = ATL_7d / CTL_28d
+EWMA_t = Load_t * lambda + EWMA_{t-1} * (1 - lambda)
+lambda = 2 / (N + 1)
 ''',
           ),
           _DocSectionCard(
             title: '3. Pyramid Warmup Set Distribution',
             description:
-                'Calculates non-fatiguing sub-maximal warmup loads based on top working set load ($w_{\text{top}}$).',
-            formulaLatex: r'''
-\text{Set 1} = 40\% \times w_{\text{top}} \quad (8 \text{ reps})
-\text{Set 2} = 60\% \times w_{\text{top}} \quad (5 \text{ reps})
-\text{Set 3} = 75\% \times w_{\text{top}} \quad (3 \text{ reps})
-\text{Set 4} = 90\% \times w_{\text{top}} \quad (1 \text{ rep})
+                'Calculates non-fatiguing sub-maximal warmup loads based on top working set load.',
+            formulaLatex: '''
+Set 1 = 40% * Top_Weight (8 reps)
+Set 2 = 60% * Top_Weight (5 reps)
+Set 3 = 75% * Top_Weight (3 reps)
+Set 4 = 90% * Top_Weight (1 rep)
 ''',
           ),
           _DocSectionCard(
             title: '4. APRE Load Adjustment Matrix',
             description:
                 'Autoregulated Progressive Resistance Exercise load adjustments based on rep completion vs target.',
-            formulaLatex: r'''
-\Delta \text{Weight} = \begin{cases} 
--2.5\text{kg to } -5\text{kg} & \text{if reps} < \text{target} - 2 \\
-\pm 0\text{kg} & \text{if reps} = \text{target} \\
-+2.5\text{kg to } +5\text{kg} & \text{if reps} > \text{target} + 2 
-\end{cases}
+            formulaLatex: '''
+Adjustment = 
+  -2.5kg to -5.0kg  if reps < target - 2
+   0.0kg            if reps == target
+  +2.5kg to +5.0kg  if reps > target + 2
 ''',
           ),
           _DocSectionCard(
             title: '5. Volume Thresholds (MEV / MAV / MRV)',
             description:
                 'Tracks weekly set volume against physiological adaptation bands.',
-            formulaLatex: r'''
-\text{MEV (Minimum Effective Volume)} \approx 6\text{–}10 \text{ sets/wk}
-\text{MAV (Maximum Adaptive Volume)} \approx 12\text{–}20 \text{ sets/wk}
-\text{MRV (Maximum Recoverable Volume)} \approx 22\text{–}25+ \text{ sets/wk}
+            formulaLatex: '''
+MEV (Minimum Effective Volume) = 6-10 sets/week
+MAV (Maximum Adaptive Volume)   = 12-20 sets/week
+MRV (Maximum Recoverable Vol)   = 22-25+ sets/week
 ''',
           ),
         ],
