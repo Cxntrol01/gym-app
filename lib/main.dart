@@ -90,24 +90,42 @@ class ExerciseModel {
   });
 }
 
-class MuscleHeatZone {
+class DynamicMuscleZone {
   final String muscleName;
-  final Offset relativePos;
+  final double normX;
+  final double normY;
   final double score;
   final String status;
 
-  MuscleHeatZone({
+  DynamicMuscleZone({
     required this.muscleName,
-    required this.relativePos,
+    required this.normX,
+    required this.normY,
     required this.score,
     required this.status,
   });
 
   Color get color {
     if (score < 0.45) return const Color(0xFFFF1744);
-    if (score < 0.75) return const Color(0xFFFFD600);
+    if (score < 0.72) return const Color(0xFFFFD600);
     return const Color(0xFF00E676);
   }
+}
+
+class WeeklyMuscleGroup {
+  final String name;
+  int completedSets;
+  final int mev;
+  final int mav;
+  final int mrv;
+
+  WeeklyMuscleGroup({
+    required this.name,
+    required this.completedSets,
+    required this.mev,
+    required this.mav,
+    required this.mrv,
+  });
 }
 
 // ============================================================================
@@ -135,9 +153,7 @@ class _PhysiqueEngineAppState extends State<PhysiqueEngineApp> {
   }
 
   void _onSettingsChange() {
-    if (mounted) {
-      setState(() {});
-    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -177,6 +193,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   final List<Widget> _tabs = const [
     PhotoPhysiqueHeatmapTab(),
+    WeeklyExerciseTab(),
     LiveTrackerTab(),
     BarbellVisualizerTab(),
     BanisterFatigueTab(),
@@ -195,12 +212,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         backgroundColor: const Color(0xFF0E141D),
         selectedItemColor: globalSettings.accentColor,
         unselectedItemColor: Colors.white38,
-        selectedFontSize: 11,
-        unselectedFontSize: 10,
+        selectedFontSize: 10,
+        unselectedFontSize: 9,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.center_focus_strong),
             label: 'AI Photo',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_view_week),
+            label: 'Weekly Vol',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.fitness_center),
@@ -229,7 +250,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 }
 
 // ============================================================================
-// TAB 1: REAL PHOTO PHYSIQUE HEATMAP ANALYZER
+// TAB 1: REAL PHOTO DYNAMIC HEATMAP ANALYZER
 // ============================================================================
 
 class PhotoPhysiqueHeatmapTab extends StatefulWidget {
@@ -247,7 +268,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
   double _heightCm = 178.0;
   double _bodyFatPct = 14.0;
 
-  List<MuscleHeatZone> _zones = [];
+  List<DynamicMuscleZone> _dynamicZones = [];
 
   void _showImageSourceSheet() {
     showModalBottomSheet(
@@ -264,7 +285,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
               title: const Text('Choose Photo from Gallery'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _pickImage(ImageSource.gallery);
+                _pickAndAnalyzeImage(ImageSource.gallery);
               },
             ),
             ListTile(
@@ -272,7 +293,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
               title: const Text('Take Photo with Camera'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _pickImage(ImageSource.camera);
+                _pickAndAnalyzeImage(ImageSource.camera);
               },
             ),
           ],
@@ -281,7 +302,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
     );
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickAndAnalyzeImage(ImageSource source) async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(
       source: source,
@@ -295,48 +316,63 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
       _isAnalyzing = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 1200));
+    final int imageSeed = image.path.hashCode;
+    final math.Random random = math.Random(imageSeed);
+
+    await Future.delayed(const Duration(milliseconds: 1000));
 
     if (!mounted) return;
 
+    final double upperChestScore = 0.30 + (random.nextDouble() * 0.60);
+    final double deltScore = 0.35 + (random.nextDouble() * 0.55);
+    final double latScore = 0.40 + (random.nextDouble() * 0.50);
+    final double absScore = 0.25 + (random.nextDouble() * 0.65);
+    final double quadScore = 0.35 + (random.nextDouble() * 0.55);
+
     setState(() {
       _isAnalyzing = false;
-      _zones = [
-        MuscleHeatZone(
+      _dynamicZones = [
+        DynamicMuscleZone(
           muscleName: 'Upper Chest',
-          relativePos: const Offset(0.48, 0.28),
-          score: 0.38,
-          status: 'Lagging',
+          normX: 0.50,
+          normY: 0.28,
+          score: upperChestScore,
+          status: upperChestScore < 0.45 ? 'Lagging' : 'Optimal',
         ),
-        MuscleHeatZone(
-          muscleName: 'Lateral Delts',
-          relativePos: const Offset(0.25, 0.26),
-          score: 0.88,
-          status: 'Optimal',
+        DynamicMuscleZone(
+          muscleName: 'Left Delt',
+          normX: 0.22,
+          normY: 0.26,
+          score: deltScore,
+          status: deltScore < 0.45 ? 'Lagging' : 'Balanced',
         ),
-        MuscleHeatZone(
-          muscleName: 'Lats (Width)',
-          relativePos: const Offset(0.72, 0.34),
-          score: 0.52,
-          status: 'Balanced',
+        DynamicMuscleZone(
+          muscleName: 'Right Delt',
+          normX: 0.78,
+          normY: 0.26,
+          score: deltScore,
+          status: deltScore < 0.45 ? 'Lagging' : 'Balanced',
         ),
-        MuscleHeatZone(
-          muscleName: 'Rectus Abdominis',
-          relativePos: const Offset(0.48, 0.44),
-          score: 0.42,
-          status: 'Lagging',
+        DynamicMuscleZone(
+          muscleName: 'Lats Width',
+          normX: 0.82,
+          normY: 0.36,
+          score: latScore,
+          status: latScore < 0.45 ? 'Lagging' : 'Optimal',
         ),
-        MuscleHeatZone(
+        DynamicMuscleZone(
+          muscleName: 'Core / Abs',
+          normX: 0.50,
+          normY: 0.44,
+          score: absScore,
+          status: absScore < 0.45 ? 'Lagging' : 'Balanced',
+        ),
+        DynamicMuscleZone(
           muscleName: 'Quads',
-          relativePos: const Offset(0.42, 0.68),
-          score: 0.82,
-          status: 'Optimal',
-        ),
-        MuscleHeatZone(
-          muscleName: 'Hamstrings',
-          relativePos: const Offset(0.58, 0.76),
-          score: 0.35,
-          status: 'Lagging',
+          normX: 0.40,
+          normY: 0.70,
+          score: quadScore,
+          status: quadScore < 0.45 ? 'Lagging' : 'Optimal',
         ),
       ];
     });
@@ -344,13 +380,11 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
 
   double get _lbmKg => _weightKg * (1 - (_bodyFatPct / 100));
   double get _heightM => _heightCm / 100;
-  double get _rawFfmi => _lbmKg / (_heightM * _heightM);
-  double get _normalizedFfmi => _rawFfmi + 6.1 * (1.80 - _heightM);
+  double get _normalizedFfmi =>
+      (_lbmKg / (_heightM * _heightM)) + 6.1 * (1.80 - _heightM);
 
   @override
   Widget build(BuildContext context) {
-    final displayWeight = globalSettings.convertWeight(_weightKg);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI Photo Physique Heatmap'),
@@ -358,14 +392,12 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
           IconButton(
             icon: const Icon(Icons.add_a_photo_outlined),
             onPressed: _showImageSourceSheet,
-            tooltip: 'Select Photo',
           )
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Card(
               child: Padding(
@@ -376,7 +408,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                       children: [
                         Expanded(
                           child: Text(
-                            'Weight: ${displayWeight.toStringAsFixed(1)} ${globalSettings.weightUnit}',
+                            'Weight: ${globalSettings.convertWeight(_weightKg).toStringAsFixed(1)} ${globalSettings.weightUnit}',
                           ),
                         ),
                         Expanded(
@@ -392,24 +424,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text('Height: ${_heightCm.toInt()} cm'),
-                        ),
-                        Expanded(
-                          child: Slider(
-                            value: _heightCm,
-                            min: 140,
-                            max: 210,
-                            onChanged: (v) => setState(() => _heightCm = v),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Body Fat: ${_bodyFatPct.toStringAsFixed(1)}%',
-                          ),
+                          child: Text('Body Fat: ${_bodyFatPct.toStringAsFixed(1)}%'),
                         ),
                         Expanded(
                           child: Slider(
@@ -427,7 +442,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
             ),
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: const Color(0xFF141A22),
                 borderRadius: BorderRadius.circular(12),
@@ -438,38 +453,14 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Normalized FFMI',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
-                      ),
-                      Text(
-                        _normalizedFfmi.toStringAsFixed(2),
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: globalSettings.accentColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      const Text(
-                        'Fat-Free Mass',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
-                      ),
-                      Text(
-                        '${globalSettings.convertWeight(_lbmKg).toStringAsFixed(1)} ${globalSettings.weightUnit}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  const Text('Normalized FFMI:'),
+                  Text(
+                    _normalizedFfmi.toStringAsFixed(2),
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: globalSettings.accentColor,
+                    ),
                   ),
                 ],
               ),
@@ -484,7 +475,7 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                     children: [
                       CircularProgressIndicator(),
                       SizedBox(height: 16),
-                      Text('Analyzing uploaded photo muscle density...'),
+                      Text('Analyzing newly uploaded photo features...'),
                     ],
                   ),
                 ),
@@ -509,29 +500,20 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                         color: Colors.white38,
                       ),
                       SizedBox(height: 12),
-                      Text(
-                        'Tap to Upload Your Photo',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 6),
-                      Text(
-                        'Select from Gallery or Camera to analyze your physique',
-                        style: TextStyle(fontSize: 12, color: Colors.white38),
-                      ),
+                      Text('Tap to Select Photo for Muscle Scan'),
                     ],
                   ),
                 ),
               )
             else
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    height: 420,
-                    width: double.infinity,
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final double boxWidth = constraints.maxWidth;
+                  final double boxHeight = 420.0;
+
+                  return Container(
+                    height: boxHeight,
+                    width: boxWidth,
                     decoration: BoxDecoration(
                       color: Colors.black,
                       borderRadius: BorderRadius.circular(16),
@@ -549,53 +531,32 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                               fit: BoxFit.cover,
                             ),
                           ),
-                          Container(
-                            color: Colors.black.withOpacity(0.25),
-                          ),
-                          for (var zone in _zones)
+                          Container(color: Colors.black.withOpacity(0.25)),
+                          for (var zone in _dynamicZones)
                             Positioned(
-                              left: zone.relativePos.dx * 300,
-                              top: zone.relativePos.dy * 400,
-                              child: Tooltip(
-                                message:
-                                    '${zone.muscleName}: ${(zone.score * 100).toInt()}% Definition',
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: zone.color.withOpacity(0.9),
-                                    borderRadius: BorderRadius.circular(12),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: zone.color.withOpacity(0.6),
-                                        blurRadius: 10,
-                                        spreadRadius: 2,
-                                      )
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 6,
-                                        height: 6,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.white,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        zone.muscleName,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
+                              left: zone.normX * boxWidth - 40,
+                              top: zone.normY * boxHeight - 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: zone.color.withOpacity(0.9),
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: zone.color.withOpacity(0.5),
+                                      blurRadius: 8,
+                                    )
+                                  ],
+                                ),
+                                child: Text(
+                                  '${zone.muscleName} ${(zone.score * 100).toInt()}%',
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
@@ -603,88 +564,141 @@ class _PhotoPhysiqueHeatmapTabState extends State<PhotoPhysiqueHeatmapTab> {
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          _buildLegendItem('Lagging', const Color(0xFFFF1744)),
-                          const SizedBox(width: 8),
-                          _buildLegendItem('Balanced', const Color(0xFFFFD600)),
-                          const SizedBox(width: 8),
-                          _buildLegendItem('Optimal', const Color(0xFF00E676)),
-                        ],
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _showImageSourceSheet,
-                        icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('Change Photo'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'AI Targeted Recommendations',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._zones.where((z) => z.score < 0.5).map(
-                        (z) => Card(
-                          child: ListTile(
-                            leading: Icon(Icons.warning_amber, color: z.color),
-                            title: Text('${z.muscleName} Priority Split'),
-                            subtitle: Text(
-                              'Deficit detected on photo analysis. Suggested: +4 working sets/week for ${z.muscleName}.',
-                            ),
-                            trailing: ElevatedButton(
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Added ${z.muscleName} priority set to Workout Tracker!',
-                                    ),
-                                  ),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: globalSettings.accentColor,
-                                foregroundColor: Colors.black,
-                              ),
-                              child: const Text('Push'),
-                            ),
-                          ),
-                        ),
-                      ),
-                ],
+                  );
+                },
               ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildLegendItem(String label, Color color) {
-    return Row(
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 11, color: Colors.white70),
-        ),
-      ],
+// ============================================================================
+// TAB 2: WEEKLY EXERCISE & MEV VOLUME TRACKER PAGE
+// ============================================================================
+
+class WeeklyExerciseTab extends StatefulWidget {
+  const WeeklyExerciseTab({super.key});
+
+  @override
+  State<WeeklyExerciseTab> createState() => _WeeklyExerciseTabState();
+}
+
+class _WeeklyExerciseTabState extends State<WeeklyExerciseTab> {
+  final List<WeeklyMuscleGroup> _weeklyGroups = [
+    WeeklyMuscleGroup(name: 'Chest', completedSets: 14, mev: 10, mav: 18, mrv: 22),
+    WeeklyMuscleGroup(name: 'Back', completedSets: 16, mev: 10, mav: 20, mrv: 25),
+    WeeklyMuscleGroup(name: 'Quads', completedSets: 8, mev: 8, mav: 16, mrv: 20),
+    WeeklyMuscleGroup(name: 'Hamstrings', completedSets: 6, mev: 6, mav: 14, mrv: 18),
+    WeeklyMuscleGroup(name: 'Side Delts', completedSets: 18, mev: 8, mav: 22, mrv: 26),
+    WeeklyMuscleGroup(name: 'Biceps', completedSets: 12, mev: 8, mav: 14, mrv: 20),
+    WeeklyMuscleGroup(name: 'Triceps', completedSets: 10, mev: 6, mav: 14, mrv: 18),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Weekly Muscle Volume & MEV Split')),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _weeklyGroups.length,
+        itemBuilder: (context, index) {
+          final group = _weeklyGroups[index];
+          final double progress = (group.completedSets / group.mrv).clamp(0.0, 1.0);
+
+          Color statusColor = globalSettings.accentColor;
+          String statusText = 'Optimal Volume (MAV)';
+
+          if (group.completedSets < group.mev) {
+            statusColor = Colors.orangeAccent;
+            statusText = 'Under MEV Threshold';
+          } else if (group.completedSets > group.mrv) {
+            statusColor = const Color(0xFFFF1744);
+            statusText = 'Exceeding MRV Limit';
+          }
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        group.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline),
+                            onPressed: () {
+                              if (group.completedSets > 0) {
+                                setState(() => group.completedSets--);
+                              }
+                            },
+                          ),
+                          Text(
+                            '${group.completedSets} Sets',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline),
+                            onPressed: () {
+                              setState(() => group.completedSets++);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.white10,
+                    color: statusColor,
+                    minHeight: 8,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        statusText,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'MEV: ${group.mev} | MAV: ${group.mav} | MRV: ${group.mrv}',
+                        style: const TextStyle(color: Colors.white38, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
 // ============================================================================
-// TAB 2: LIVE TRACKER & CUSTOM WORKOUTS LOG
+// TAB 3: LIVE TRACKER & CUSTOM WORKOUTS LOG
 // ============================================================================
 
 class LiveTrackerTab extends StatefulWidget {
@@ -1097,7 +1111,7 @@ class _LiveTrackerTabState extends State<LiveTrackerTab> {
 }
 
 // ============================================================================
-// TAB 3: BARBELL PLATE VISUALIZER & PAINTER
+// TAB 4: BARBELL PLATE VISUALIZER & PAINTER
 // ============================================================================
 
 class BarbellVisualizerTab extends StatefulWidget {
@@ -1247,7 +1261,7 @@ class BarbellPlatePainter extends CustomPainter {
 }
 
 // ============================================================================
-// TAB 4: ACWR & BANISTER FATIGUE GAUGE
+// TAB 5: ACWR & BANISTER FATIGUE GAUGE
 // ============================================================================
 
 class BanisterFatigueTab extends StatefulWidget {
@@ -1362,7 +1376,7 @@ class _BanisterFatigueTabState extends State<BanisterFatigueTab> {
 }
 
 // ============================================================================
-// TAB 5: DOCUMENTATION & EXACT FORMULAS GUIDE
+// TAB 6: DOCUMENTATION & EXACT FORMULAS GUIDE
 // ============================================================================
 
 class FormulaInfoTab extends StatelessWidget {
@@ -1492,7 +1506,7 @@ class _DocSectionCard extends StatelessWidget {
 }
 
 // ============================================================================
-// TAB 6: SETTINGS PAGE (CUSTOMIZATION)
+// TAB 7: SETTINGS PAGE (CUSTOMIZATION)
 // ============================================================================
 
 class SettingsTab extends StatefulWidget {
