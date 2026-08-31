@@ -151,7 +151,7 @@ class _PhysiqueEngineAppState extends State<PhysiqueEngineApp> {
           secondary: globalSettings.accentColor,
           surface: const Color(0xFF141A22),
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: const Color(0xFF141A22),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
