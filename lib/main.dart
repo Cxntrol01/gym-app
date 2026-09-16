@@ -147,7 +147,6 @@ class AppState extends ChangeNotifier {
 
   int get consistencyStreak {
     if (workoutHistory.isEmpty) return 1;
-    // Basic streak representation based on active tracking days
     return 1 + (workoutHistory.length ~/ 3);
   }
 }
@@ -509,7 +508,7 @@ class _BarRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.between,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween, // Fixed
           children: [
             Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
             Text('${valueKg.toStringAsFixed(1)} kg', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
